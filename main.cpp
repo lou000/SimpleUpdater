@@ -3,6 +3,8 @@
 #include <QApplication>
 #include <QCommandLineParser>
 #include <QStyleHints>
+#include <QVersionNumber>
+#include "filehandler.h"
 
 int main(int argc, char *argv[])
 {
@@ -15,47 +17,102 @@ int main(int argc, char *argv[])
     parser.addHelpOption();
     parser.addVersionOption();
 
-    QCommandLineOption updateLocation(QStringList() << "l" << "location",
-                                  "Location of a new application version.",
-                                  "location");
-    parser.addOption(updateLocation);
+    QCommandLineOption sourceLocation(QStringList()<<"s"<<"source",
+                                  "Source location of the update.",
+                                  "path/to/source");
+    parser.addOption(sourceLocation);
 
-    QCommandLineOption forceFullUpdate(QStringList() << "f" << "full",
-                                  "Forces complete update even if only couple files changed.",
-                                  "full");
+    QCommandLineOption targetLocation(QStringList()<<"t"<<"target",
+                                      "Target location of the update. If empty then target is application directory.",
+                                      "path/to/source");
+    parser.addOption(targetLocation);
+
+    QCommandLineOption forceFullUpdate(QStringList()<<"f"<<"full",
+                                  "Forces complete update even if only couple files changed.");
     parser.addOption(forceFullUpdate);
 
-    QCommandLineOption applicationExe(QStringList() << "e" << "exe",
+    QCommandLineOption applicationExe(QStringList()<<"e"<<"exe",
                                        "Original application executable, if not set the updater will not relaunch the original application.",
-                                       "exe");
+                                       "path/to/exe");
     parser.addOption(applicationExe);
+
+    QCommandLineOption generateInfo(QStringList()<<"g"<<"generate",
+                                      "Generate updateInfo.ini with settings and hashes for all the files in source directory recursively."
+                                      "If source is not set application will use current directory."
+                                      "Should be used inside the update directory.");
+    parser.addOption(generateInfo);
+
+    QCommandLineOption version(QStringList()<<"u"<<"update_version",
+                                    "Sets a version of the update, to be used with -g/-generate, does nothing by itself",
+                                    "d.d.d");
+    parser.addOption(version);
     parser.process(a);
 
-    if(!parser.isSet(updateLocation))
+    QDir sourceDir;
+    if(parser.isSet(sourceLocation))
     {
-        qCritical() << "Error: Location option is required.";
-        parser.showHelp(1);
+        QString sourcePath = parser.value(sourceLocation);
+        sourceDir = QDir(sourcePath);
+        if(!sourceDir.exists() || !sourceDir.isReadable())
+        {
+            qCritical()<<"Source location"<<sourcePath<<"is either invalid or not accesible!";
+            return 1;
+        }
     }
-    auto originalApp = new QFile();
-    if(parser.isSet(updateLocation))
+
+    QDir targetDir;
+    if(parser.isSet(targetLocation))
     {
-        originalApp = new QFile(parser.value(applicationExe));
+        QString targetPath = parser.value(targetLocation);
+        targetDir = QDir(targetPath);
+        if(!targetDir.exists() || !targetDir.isReadable())
+        {
+            qCritical()<<"Target location"<<targetPath<<"is either invalid or not accesible!";
+            return 1;
+        }
+    }
+    else
+        targetDir = QApplication::applicationDirPath();
+
+    QFile* originalApp = nullptr;
+    if(parser.isSet(applicationExe))
+    {
+        QString appPath = parser.value(applicationExe);
+        originalApp = new QFile(appPath);
         if(originalApp->exists() || originalApp->permissions() & QFile::ExeUser)
         {
-            qCritical() << "Error: Original application executable is not reachable or launching it is not permitted.";
+            qCritical()<<"Error: Original application executable is not reachable or launching it is not permitted.";
             parser.showHelp(1);
         }
     }
-    QString updatePath = parser.value(updateLocation);
-    if(auto path = new QDir(updatePath); path->exists() && path->isReadable())
+
+    if(parser.isSet(generateInfo))
     {
-        MainWindow w(path, originalApp, parser.isSet(forceFullUpdate));
-        w.show();
-        return a.exec();
+        QDir dir = QApplication::applicationDirPath();
+        if(parser.isSet(sourceLocation))
+            dir = sourceDir;
+
+        QVersionNumber v;
+        if(parser.isSet(version))
+        {
+            auto str = parser.value(version);
+            v = QVersionNumber::fromString(str);
+            if(v.isNull() || v.segmentCount() == 0)
+            {
+                qDebug() << "Parsing failed for version string:" << str;
+                return 1;
+            }
+        }
+        qDebug()<<"Generating updateInfo.ini for";
+        qDebug()<<"Hashing files...";
+        FileHandler::generateInfoFile(dir, v);
+        return 0;
     }
-    else
-    {
-        qCritical() << "Error: Location is unreachable on unreadable.";
-        parser.showHelp(1);
-    }
+
+    // If installation is true then the application will proceed to ask for target filepath and then recursively copy
+    // all files from current application directory to that location
+    bool installation = parser.optionNames().isEmpty();
+    MainWindow w(sourceDir, targetDir, originalApp, parser.isSet(forceFullUpdate), installation);
+    w.show();
+    return a.exec();
 }

@@ -10,7 +10,7 @@ qt_add_executable(SimpleUpdater
     main.cpp
     mainwindow.cpp
     mainwindow.h
-    filecopier.h filecopier.cpp
+    filehandler.h filehandler.cpp
 )
 
 target_link_libraries(SimpleUpdater

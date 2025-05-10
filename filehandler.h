@@ -1,23 +1,27 @@
-#ifndef FILECOPIER_H
-#define FILECOPIER_H
+#ifndef FILEHANDLER_H
+#define FILEHANDLER_H
 
 #include <QDir>
 #include <QObject>
+#include <QVersionNumber>
 
-class FileCopier : public QObject {
+class FileHandler : public QObject {
     Q_OBJECT
 public:
-    explicit FileCopier(QObject* parent = nullptr) : QObject(parent) {}
+    explicit FileHandler(QObject* parent = nullptr);
 
     void copyDirectoryRecursively(const QDir &source, const QDir &target);
     static bool copyFileSafely(const QString& src, const QString& dst);
     static int getNumberOfFilesRecursive(const QDir &source);
+    static QByteArray hashFile(QFile& file);
+    static void generateInfoFile(const QDir& directory, const QVersionNumber &version);
+
 public slots:
     void cancel(){cancelRequested.store(true);}
 
 signals:
     void progressUpdated(QMap<QString, bool> success);
-    void copyFinished();
+    void copyFinished(bool success);
     void cancelled();
 
 private:
@@ -27,4 +31,4 @@ private:
 };
 
 
-#endif // FILECOPIER_H
+#endif // FILEHANDLER_H
