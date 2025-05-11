@@ -10,8 +10,14 @@
 #include <QPlainTextEdit>
 #include <QStandardPaths>
 #include <QApplication>
+#include <QMessageBox>
+#include <QStyleFactory>
+#include <QProcess>
+#include <QFileDialog>
+#include <QThreadPool>
+#include <QScrollBar>
 
-MainWindow::MainWindow(const QDir& sourceLocation, const QDir& targetLocation, QFile* originalApplication,
+MainWindow::MainWindow(const QDir& sourceLocation, const QDir& targetLocation, const QString& originalApplication,
                        bool fullUpdate, bool installation, QWidget *parent)
     : QMainWindow(parent), sourceLocation(sourceLocation), targetLocation(targetLocation),
     originalApplication(originalApplication), fullUpdate(fullUpdate), fileHandler(new FileHandler(this))
@@ -66,11 +72,16 @@ MainWindow::MainWindow(const QDir& sourceLocation, const QDir& targetLocation, Q
     progressLayout->addWidget(new QLabel(tr("Installation/Update is in progress. Please wait...")));
 
     progressBar = new QProgressBar();
+    QStyle *style = QStyleFactory::create("Fusion");
+    if(style)
+        progressBar->setStyle(style);
+    progressBar->setStyleSheet("background-color: rgb(70, 70 ,70)");
+    progressBar->setTextVisible(true);
+    progressBar->setRange(0, 100);
     progressLayout->addWidget(progressBar);
 
-    logBox = new QPlainTextEdit();
+    logBox = new QTextEdit();
     logBox->setReadOnly(true);
-    logBox->setMaximumBlockCount(1000);
     logBox->setMinimumHeight(150);
     progressLayout->addWidget(logBox);
 
@@ -80,37 +91,122 @@ MainWindow::MainWindow(const QDir& sourceLocation, const QDir& targetLocation, Q
     // --------- Shared Buttons ---------
     QHBoxLayout* buttonLayout = new QHBoxLayout();
     buttonLayout->addStretch();
+    updateLater = new QPushButton(tr("Update Later"));
     cancelButton = new QPushButton(tr("Cancel"));
     proceedButton = new QPushButton(tr("Proceed"));
     proceedButton->setDefault(true);
+    buttonLayout->addWidget(updateLater);
     buttonLayout->addWidget(cancelButton);
     buttonLayout->addWidget(proceedButton);
+    updateLater->setVisible(false);
 
     mainLayout->addLayout(buttonLayout);
 
     centralWidget->setLayout(mainLayout);
     setCentralWidget(centralWidget);
 
-    connect(proceedButton, &QPushButton::clicked, this, [this](){
-        int currentIndex = stackedWidget->currentIndex();
+    if(installation)
+        stackedWidget->setCurrentIndex(0);
+    else
+        stackedWidget->setCurrentIndex(1);
 
-        // Switch between screens for debugging
-        if (currentIndex == 0) {
-            stackedWidget->setCurrentIndex(1);  // Go to Update screen
-        } else if (currentIndex == 1) {
-            stackedWidget->setCurrentIndex(2);  // Go to Progress screen
-        } else {
-            stackedWidget->setCurrentIndex(0);  // Go to Install screen
+    connect(browseButton, &QPushButton::clicked, this, [this](){
+        QString dir = QFileDialog::getExistingDirectory(this, "Select Directory");
+        if (!dir.isEmpty())
+            pathEdit->setText(dir);
+    });
+
+    connect(proceedButton, &QPushButton::clicked, this, [this, installation](){
+        if(installation)
+        {
+            auto installationDir = QDir(pathEdit->text());
+            if(!installationDir.mkpath(pathEdit->text()))
+            {
+                QMessageBox::critical(this, "Invalid directory",
+                                      "The provided directory cannot be created or is inaccesible, check permissions.");
+                return;
+            }
+            qDebug()<<installationDir;
+            installApplication(installationDir);
         }
+        else
+            updateApplication();
+
+        stackedWidget->setCurrentIndex(2);
+        proceedButton->setVisible(false);
+    });
+    connect(cancelButton, &QPushButton::clicked, [this](){
+        auto answer = QMessageBox::question(this, tr("Interrupt Operation?"),
+                                            tr("Are you sure you want to cancel the current operation?\n\n"
+                                               "Interrupting it at this stage may leave the application in an unusable or inconsistent state."),
+                                            QMessageBox::Yes | QMessageBox::No,
+                                            QMessageBox::No);
+        if (answer == QMessageBox::Yes)
+            fileHandler->cancel();
+    });
+    connect(fileHandler, &FileHandler::progressUpdated, this, [this](QPair<QString, bool> results){
+        progressBar->setValue(progressBar->value()+1);
+
+        QScrollBar* vScroll = logBox->verticalScrollBar();
+        bool atBottom = (vScroll->value() == vScroll->maximum());
+
+        QColor textColor = results.second ? Qt::white : Qt::red;
+        QTextCharFormat format;
+        format.setForeground(textColor);
+
+        QTextCursor cursor = logBox->textCursor();
+        cursor.movePosition(QTextCursor::End);
+
+        QString resultStr = results.second ? "OK" : "ERROR";
+        cursor.insertText(results.first+"    "+resultStr+"\n", format);
+        if (atBottom)
+            vScroll->setValue(vScroll->maximum());
+    });
+    connect(fileHandler, &FileHandler::copyFinished, this, [this](bool success){
+        if(!success)
+            QMessageBox::critical(this, tr("Copy failed!"),
+                                  tr("Installation/update process failed, "
+                                  "please refer to log to see what files were not possible to copy succesfully."));
+        else
+        {
+            auto app = this->originalApplication;
+            if(!app.isEmpty())
+            {
+                bool success = QProcess::startDetached(this->originalApplication, {});
+                if(!success)
+                    qWarning() << "Failed to start"<<this->originalApplication;
+            }
+            QThread::msleep(500);
+            QApplication::quit();
+        }
+    });
+    connect(fileHandler, &FileHandler::cancelled, this, [this](){
+        QApplication::quit();
     });
 }
 
-bool MainWindow::installApplication()
+void MainWindow::installApplication(const QDir& dir)
 {
-    return true;
+    int fileCount = 0;
+    auto info = QSettings("updateInfo.ini", QSettings::IniFormat);
+    if(info.contains("SETTINGS/file_count"))
+        fileCount = info.value("SETTINGS/file_count").toInt();
+    if(fileCount == 0)
+        fileCount = FileHandler::getNumberOfFilesRecursive(QApplication::applicationDirPath());
+
+    progressBar->setRange(0, fileCount-1);
+
+    QThreadPool::globalInstance()->start([this, dir](){
+        fileHandler->copyDirectoryRecursively(QApplication::applicationDirPath(), dir);
+    });
 }
 
-bool MainWindow::updateApplication()
+void MainWindow::updateApplication()
 {
-    return true;
+    auto sourceInfo = QSettings(sourceLocation.filePath("updateInfo.ini"), QSettings::IniFormat);
+    auto targetInfo = QSettings(targetLocation.filePath("updateInfo.ini"), QSettings::IniFormat);
+    if(this->fullUpdate)
+    {
+
+    }
 }

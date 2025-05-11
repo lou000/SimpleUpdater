@@ -8,19 +8,19 @@ class QPushButton;
 class QLineEdit;
 class FileHandler;
 class QStackedWidget;
-class QPlainTextEdit;
+class QTextEdit;
 class QProgressBar;
 class MainWindow : public QMainWindow
 {
     Q_OBJECT
 
 public:
-    MainWindow(const QDir& sourceLocation, const QDir& targetLocation, QFile* originalApplication,
+    MainWindow(const QDir& sourceLocation, const QDir& targetLocation, const QString &originalApplication,
                bool fullUpdate, bool installation, QWidget *parent = nullptr);
 
 private:
-    bool installApplication();
-    bool updateApplication();
+    void installApplication(const QDir &dir);
+    void updateApplication();
 
     QStackedWidget* stackedWidget;
     QWidget* installScreen;
@@ -29,14 +29,15 @@ private:
     QLineEdit* pathEdit;
     QPushButton* browseButton;
     QProgressBar* progressBar;
-    QPlainTextEdit* logBox;
+    QTextEdit* logBox;
+    QPushButton* updateLater;
     QPushButton* cancelButton;
     QPushButton* proceedButton;
 
     FileHandler* fileHandler;
     QDir sourceLocation;
     QDir targetLocation;
-    QFile* originalApplication;
+    QString originalApplication;
     bool fullUpdate;
     bool forcedUpdate;
 };

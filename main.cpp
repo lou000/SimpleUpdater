@@ -74,15 +74,15 @@ int main(int argc, char *argv[])
     else
         targetDir = QApplication::applicationDirPath();
 
-    QFile* originalApp = nullptr;
+    QString originalApp = "";
     if(parser.isSet(applicationExe))
     {
         QString appPath = parser.value(applicationExe);
-        originalApp = new QFile(appPath);
-        if(originalApp->exists() || originalApp->permissions() & QFile::ExeUser)
+        auto file = new QFile(appPath);
+        if(file->exists() || file->permissions() & QFile::ExeUser)
         {
             qCritical()<<"Error: Original application executable is not reachable or launching it is not permitted.";
-            parser.showHelp(1);
+            return 1;
         }
     }
 
@@ -112,6 +112,13 @@ int main(int argc, char *argv[])
     // If installation is true then the application will proceed to ask for target filepath and then recursively copy
     // all files from current application directory to that location
     bool installation = parser.optionNames().isEmpty();
+    if(!installation)   //sanity check
+        if(!sourceDir.exists())
+        {
+            qCritical()<<"Need source location to perform the update!";
+            return 1;
+        }
+
     MainWindow w(sourceDir, targetDir, originalApp, parser.isSet(forceFullUpdate), installation);
     w.show();
     return a.exec();
