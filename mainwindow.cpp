@@ -226,7 +226,8 @@ MainWindow::MainWindow(const std::optional<QDir>& sourceLocation, const std::opt
                 dir = targetLocation.value();
 
             QThread::msleep(300);
-            progressBar->hide();
+            if(progressBar->maximum()==0)
+                progressBar->hide();
             if(launchApp(dir, {installation ? "-installation" : "-update"}))
                 QApplication::quit();
             else
@@ -292,7 +293,10 @@ void MainWindow::installApplication(QDir sourceDir, QDir targetDir)
                 temp.removeRecursively();
                 parentDir.rename(backupDir.dirName(), originalName);
             }
-            logMessage("INSTALLATION"+QString((copySuccess ? " SUCCESS" : " FAILED")), copySuccess ? Qt::green : Qt::red);
+            QMetaObject::invokeMethod(this, [this, copySuccess]() {
+                logMessage("INSTALLATION" + QString(copySuccess ? " SUCCESS" : " FAILED"),
+                           copySuccess ? Qt::green : Qt::red);
+            }, Qt::QueuedConnection);
         }
         if(backupDir.exists())
             backupDir.removeRecursively();
@@ -365,7 +369,10 @@ void MainWindow::updateApplication(QDir sourceDir, QDir targetDir)
                 }
                 else
                     fileHandler->copyFiles(backupDir, targetDir, backupFiles, false);
-                logMessage("INSTALLATION"+QString((copySuccess ? " SUCCESS" : " FAILED")), copySuccess ? Qt::green : Qt::red);
+                QMetaObject::invokeMethod(this, [this, copySuccess]() {
+                    logMessage("UPDATE" + QString(copySuccess ? " SUCCESS" : " FAILED"),
+                               copySuccess ? Qt::green : Qt::red);
+                }, Qt::QueuedConnection);
             }
             if(backupDir.exists())
                 backupDir.removeRecursively();
