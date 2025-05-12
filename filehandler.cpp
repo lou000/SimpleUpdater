@@ -8,10 +8,7 @@
 FileHandler::FileHandler(QObject *parent)
     : QObject(parent)
 {
-    connect(this, &FileHandler::cancelled, this, [this](){
-        //TODO: do buckup and revert to backup
-        copyFinished(false);
-    });
+
 }
 
 bool FileHandler::_copyDirectoryRecursively(const QDir& source, const QDir& target, QSet<QString>* visited)
@@ -75,10 +72,10 @@ bool FileHandler::_copyDirectoryRecursively(const QDir& source, const QDir& targ
             {
                 qWarning()<<"Failed to create symbolic link:"<<tgtFilePath;
                 success = false;
-                emit progressUpdated({srcFilePath, false});
+                emit progressUpdated({srcFilePath+" (COPY)", false});
             }
             else
-                emit progressUpdated({srcFilePath, true});
+                emit progressUpdated({srcFilePath+" (COPY)", true});
         }
         else if(entry.isDir())
         {
@@ -95,13 +92,13 @@ bool FileHandler::_copyDirectoryRecursively(const QDir& source, const QDir& targ
                 success = false;
             }
             visited->insert(srcFilePath);
-            emit progressUpdated({srcFilePath, success});
+            emit progressUpdated({srcFilePath+" (COPY)", success});
         }
         else
         {
             success = false;
             qWarning()<<"Unknown entry type skipped:"<<srcFilePath;
-            emit progressUpdated({srcFilePath, false});
+            emit progressUpdated({srcFilePath+" (COPY)", false});
         }
 
         if(cancelRequested.load())
@@ -119,87 +116,24 @@ bool FileHandler::_copyDirectoryRecursively(const QDir& source, const QDir& targ
     return success;
 }
 
-void FileHandler::copyDirectoryRecursively(QDir source, QDir target)
+bool FileHandler::copyDirectoryRecursively(QDir source, QDir target)
 {
     QSet<QString> visited;
-
-    QDir parentDir = target;
-    parentDir.cdUp();
-    QString backupName = target.dirName() + "_backup";
-    QDir backupDir = parentDir.filePath(backupName);
-    if (!backupDir.exists())
-        parentDir.mkdir(backupName);
-
-    emit progressUpdated({"STARTING BACKUP", true});
-    bool backupSuccess = _copyDirectoryRecursively(target, backupDir, &visited);
-    emit progressUpdated({"BACKUP COMPLETE", backupSuccess});
-    visited.clear();
-    qDebug()<<backupSuccess;
-    bool success = false;
-    if(backupSuccess)
-    {
-        success = _copyDirectoryRecursively(source, target, &visited);
-        if(!success)
-        {
-            target.removeRecursively();
-            parentDir.rename(backupDir.dirName(), target.dirName());
-        }
-    }
-    if(backupDir.exists())
-        backupDir.removeRecursively();
-
-    emit copyFinished(success);
+    bool success = _copyDirectoryRecursively(source, target, &visited);
+    cancelRequested.store(false);
+    canceled.store(false);
+    return success;
 }
 
-bool FileHandler::copyFiles(QDir source, QDir target, QStringList filePaths)
-{
-    //create backup folder
-    QDir backupDir = target.filePath("update_backup");
-    if(backupDir.exists())
-        backupDir.removeRecursively();
-    target.mkdir("update_backup");
-
-    // backup files
-    QStringList backupFiles;
-    for(const auto& relPath : filePaths)
-        if(QFile::exists(target.filePath(relPath)))
-            backupFiles.append(relPath);
-
-    emit progressUpdated({"STARTING BACKUP", true});
-    bool backupSuccess = _copyFiles(target, backupDir, backupFiles, true);
-    emit progressUpdated({"BACKUP COMPLETE", backupSuccess});
-
-    if(!backupSuccess)
-    {
-        backupDir.removeRecursively();
-        emit copyFinished(false);
-        return false;
-    }
-    //update files
-    bool updateSuccess = _copyFiles(source, target, filePaths, true);
-
-    //restore backup if update failed
-    if(!updateSuccess)
-        _copyFiles(backupDir, target, backupFiles, false);
-    if(backupDir.exists())
-        backupDir.removeRecursively();
-
-    return updateSuccess;
-}
-
-bool FileHandler::_copyFiles(QDir source, QDir target, QStringList filePaths, bool cancelable)
+bool FileHandler::copyFiles(QDir source, QDir target, QStringList filePaths, bool cancelable)
 {
     bool updateSuccess = true;
     for(const auto& relPath : filePaths)
     {
         if (cancelRequested.load() && cancelable)
         {
-            if (!canceled.load())
-            {
-                emit cancelled();
-                canceled.store(true);
-            }
-            return false;
+            updateSuccess = false;
+            break;
         }
 
         QString srcPath = source.filePath(relPath);
@@ -227,8 +161,37 @@ bool FileHandler::_copyFiles(QDir source, QDir target, QStringList filePaths, bo
         if(!success)
             updateSuccess = false;
     }
+    cancelRequested.store(false);
     return updateSuccess;
 }
+
+bool FileHandler::removeFiles(QDir dir, QStringList filePaths)
+{
+    bool allRemoved = true;
+
+    for (const auto& relPath : filePaths)
+    {
+        QString filePath = dir.filePath(relPath);
+        QFileInfo fileInfo(filePath);
+
+        if (!fileInfo.exists())
+        {
+            qWarning() << "File does not exist:" << filePath;
+            emit progressUpdated({filePath + " (REMOVE)", false});
+            continue;
+        }
+
+        bool success = QFile::remove(filePath);
+        emit progressUpdated({filePath + " (REMOVE)", success});
+        if (!success)
+        {
+            qWarning() << "Failed to remove file:" << filePath;
+            allRemoved = false;
+        }
+    }
+    return allRemoved;
+}
+
 
 int FileHandler::getFileCountRecursive(const QDir &source)
 {
@@ -250,7 +213,7 @@ QByteArray FileHandler::hashFile(QFile &file)
 {
     if (!file.open(QFile::ReadOnly))
     {
-        qWarning()<<"Failed to open"<<file.fileName()<<"for reading!";
+        qWarning()<<"Failed to open"<<file.fileName()<<"for reading!\n"<<file.errorString();
         return QByteArray();
     }
 
@@ -263,7 +226,7 @@ void FileHandler::generateInfoFile(const QDir& directory, const QVersionNumber &
                                    const QString& appExe, bool full, bool force)
 {
     //Remove old file if it exists
-    auto updateInfo = QSettings("updateInfo.ini", QSettings::IniFormat);
+    auto updateInfo = QSettings(directory.absoluteFilePath("updateInfo.ini"), QSettings::IniFormat);
     QStringList groups = updateInfo.childGroups();
 
     updateInfo.beginGroup("SETTINGS");
@@ -277,8 +240,6 @@ void FileHandler::generateInfoFile(const QDir& directory, const QVersionNumber &
     if(groups.contains("FILE_HASHES"))
         updateInfo.remove("FILE_HASHES");
 
-    auto exeInfo = QFileInfo(QApplication::applicationFilePath());
-
     int fileCount = 0;
     std::function<void(QDir)> hashFileRecursive = [&](QDir dir){
         QFileInfoList entries = dir.entryInfoList(QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot | QDir::Hidden | QDir::System);
@@ -288,13 +249,12 @@ void FileHandler::generateInfoFile(const QDir& directory, const QVersionNumber &
                 hashFileRecursive(QDir(entry.absoluteFilePath()));
             else if (entry.isFile())
             {
-                // if(entry == exeInfo) // skip self
-                //     continue;
                 auto filePath = entry.absoluteFilePath();
-                filePath = directory.relativeFilePath(filePath);
                 auto file = QFile(filePath);
                 QByteArray hash = hashFile(file);
+
                 //encoding filepath to base64 and ovoid / clashing in QSettings
+                filePath = directory.relativeFilePath(filePath);
                 updateInfo.setValue(filePath.replace('/', "|"), hash);
                 fileCount++;
             }

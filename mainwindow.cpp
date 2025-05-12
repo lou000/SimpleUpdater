@@ -16,6 +16,7 @@
 #include <QFileDialog>
 #include <QThreadPool>
 #include <QScrollBar>
+#include <QUuid>
 
 MainWindow::MainWindow(const std::optional<QDir>& sourceLocation, const std::optional<QDir>& targetLocation, QWidget *parent)
     : QMainWindow(parent), fileHandler(new FileHandler(this))
@@ -29,14 +30,18 @@ MainWindow::MainWindow(const std::optional<QDir>& sourceLocation, const std::opt
     {
         if(!targetLocation->exists("updateInfo.ini"))
             FileHandler::generateInfoFile(targetLocation.value(), {}, {}, false, false);
-        sourceInfo.emplace(targetLocation->filePath("updateInfo.ini"), QSettings::IniFormat);
+        targetInfo.emplace(targetLocation->filePath("updateInfo.ini"), QSettings::IniFormat);
     }
     else
     {
         if(!QDir().exists("updateInfo.ini"))
-            FileHandler::generateInfoFile(targetLocation.value(), {}, {}, false, false);
-        sourceInfo.emplace(QDir().filePath("updateInfo.ini"), QSettings::IniFormat);
+            FileHandler::generateInfoFile(QDir(), {}, {}, false, false);
+        targetInfo.emplace(QDir().filePath("updateInfo.ini"), QSettings::IniFormat);
     }
+
+    bool forceUpdate = true;
+    if(sourceInfo && sourceInfo->contains("SETTINGS/force_update"))
+        forceUpdate = sourceInfo->value("SETTINGS/force_update").toBool();
 
     resize(600, 400);
     setWindowFlags(windowFlags() & ~Qt::WindowMaximizeButtonHint);
@@ -76,7 +81,16 @@ MainWindow::MainWindow(const std::optional<QDir>& sourceLocation, const std::opt
     QVBoxLayout* updateLayout = new QVBoxLayout(updateScreen);
     updateLayout->setSpacing(12);
     updateLayout->addWidget(new QLabel("<b>"+tr("Update Detected")+"</b>"));
-    updateLayout->addWidget(new QLabel(tr("Your application will now be updated to the latest version.")));
+    QString oldVersion = targetInfo ? targetInfo->value("SETTINGS/app_version").toString() : "?.?.?";
+    QString newVersion = sourceInfo ? sourceInfo->value("SETTINGS/app_version").toString() : "?.?.?";
+    QString appName = sourceInfo ? sourceInfo->value("SETTINGS/app_exe").toString() : "Your application";
+    if(appName.isEmpty())
+        appName = "Your application";
+    QString forceUpdateText = "This update is mandatory and cannot be skipped!";
+    if(forceUpdate)
+        forceUpdateText = "This update can be skipped, press \"Update Later\" to launch application without updating.";
+    updateLayout->addWidget(new QLabel(tr("%1 (%2) will now be updated to the latest version (%3).\n%4")
+                                           .arg(appName, oldVersion, newVersion, forceUpdateText)));
     updateLayout->addStretch();
     stackedWidget->addWidget(updateScreen);
 
@@ -99,6 +113,9 @@ MainWindow::MainWindow(const std::optional<QDir>& sourceLocation, const std::opt
     logBox = new QTextEdit();
     logBox->setReadOnly(true);
     logBox->setMinimumHeight(150);
+    QFont font("Courier");
+    font.setStyleHint(QFont::Monospace);
+    logBox->setFont(font);
     progressLayout->addWidget(logBox);
 
     stackedWidget->addWidget(progressScreen);
@@ -107,16 +124,16 @@ MainWindow::MainWindow(const std::optional<QDir>& sourceLocation, const std::opt
     // --------- Shared Buttons ---------
     QHBoxLayout* buttonLayout = new QHBoxLayout();
     buttonLayout->addStretch();
-    updateLater = new QPushButton(tr("Update Later"));
+    updateLaterButton = new QPushButton(tr("Update Later"));
     cancelButton = new QPushButton(tr("Cancel"));
     continueButton = new QPushButton(tr("Continue"));
     quitButton = new QPushButton(tr("Quit"));
     continueButton->setDefault(true);
-    buttonLayout->addWidget(updateLater);
+    buttonLayout->addWidget(updateLaterButton);
     buttonLayout->addWidget(quitButton);
     buttonLayout->addWidget(cancelButton);
     buttonLayout->addWidget(continueButton);
-    updateLater->setVisible(false);
+    updateLaterButton->setVisible(forceUpdate);
     cancelButton->setVisible(false);
 
     mainLayout->addLayout(buttonLayout);
@@ -134,6 +151,12 @@ MainWindow::MainWindow(const std::optional<QDir>& sourceLocation, const std::opt
         stackedWidget->setCurrentIndex(1);
 
     connect(quitButton, &QPushButton::clicked, [](){QApplication::quit();});
+    connect(updateLaterButton, &QPushButton::clicked, [this, targetLocation](){
+        QDir dir;
+        if(targetLocation)
+            dir = targetLocation.value();
+        launchApp(dir, {"-update_skipped"});
+    });
     connect(browseButton, &QPushButton::clicked, this, [this](){
         QString dir = QFileDialog::getExistingDirectory(this, "Select Directory");
         if (!dir.isEmpty())
@@ -162,9 +185,11 @@ MainWindow::MainWindow(const std::optional<QDir>& sourceLocation, const std::opt
         }
 
         stackedWidget->setCurrentIndex(2);
-        continueButton->setVisible(false);
         quitButton->setVisible(false);
+        continueButton->setVisible(false);
+        updateLaterButton->setVisible(false);
     });
+
     connect(cancelButton, &QPushButton::clicked, [this](){
         auto answer = QMessageBox::question(this, tr("Interrupt Operation?"),
                                             tr("Are you sure you want to cancel the current operation?\n\n"
@@ -174,31 +199,15 @@ MainWindow::MainWindow(const std::optional<QDir>& sourceLocation, const std::opt
         if (answer == QMessageBox::Yes)
             fileHandler->cancel();
     });
-    connect(fileHandler, &FileHandler::progressUpdated, this, [this](QPair<QString, bool> results){
+
+    connect(fileHandler, &FileHandler::progressUpdated, this, [this](QPair<QString, bool> result){
         progressBar->setValue(progressBar->value()+1);
-
-        QScrollBar* vScroll = logBox->verticalScrollBar();
-        bool atBottom = (vScroll->value() == vScroll->maximum());
-
-        QColor textColor = results.second ? Qt::white : Qt::red;
-        QTextCharFormat format;
-        format.setForeground(textColor);
-
-        QTextCursor cursor = logBox->textCursor();
-        cursor.movePosition(QTextCursor::End);
-
-        QFontMetrics metrics(logBox->font());
-        int maxWidth = logBox->viewport()->width();
-        QString elidedText = metrics.elidedText(results.first, Qt::ElideLeft, maxWidth - 80);
-
-        QString resultStr = results.second ? "OK" : "ERROR";
-        cursor.insertText(elidedText + "    " + resultStr + "\n", format);
-
-        if (atBottom)
-            vScroll->setValue(vScroll->maximum());
-
+        auto msg = result.first + (result.second ? "    OK" : "    ERROR");
+        auto color = result.second ? Qt::white : Qt::red;
+        logMessage(msg, color);
     });
-    connect(fileHandler, &FileHandler::copyFinished, this, [this, targetLocation, installation](bool success){
+
+    connect(this, &MainWindow::processFinished, this, [this, targetLocation, installation](bool success){
         if(!success)
         {
             QMessageBox::critical(this, tr("Copy failed!"),
@@ -210,36 +219,21 @@ MainWindow::MainWindow(const std::optional<QDir>& sourceLocation, const std::opt
         }
         else
         {
-            if(sourceInfo && sourceInfo->contains("SETTINGS/app_exe"))
-            {
-                QString relativeAppPath = sourceInfo->value("SETTINGS/app_exe").toString();
-                QDir dir;
-                if(installation)
-                    dir = pathEdit->text();
-                else if(targetLocation)
-                    dir = targetLocation.value();
+            QDir dir;
+            if(installation)
+                dir = pathEdit->text();
+            else if(targetLocation)
+                dir = targetLocation.value();
 
-
-                QString absolutePath = dir.absoluteFilePath(relativeAppPath);
-
-                if(QFile::exists(absolutePath))
-                {
-                    //TODO: maybe add arguments if it was installation or update etc.
-                    qDebug()<<"Launching application"<<absolutePath;
-                    bool success = QProcess::startDetached(absolutePath, {});
-                    if(!success)
-                        qWarning() << "Failed to start"<<absolutePath;
-                }
-                else
-                    qWarning()<<"Cannot find app_exe="<<relativeAppPath<<" in destination/target directory="<<dir.absolutePath()<<"after copy operation";
-            }
-            QThread::msleep(500);
-            QApplication::quit();
+            QThread::msleep(300);
+            progressBar->hide();
+            if(launchApp(dir, {installation ? "-installation" : "-update"}))
+                QApplication::quit();
+            else
+                quitButton->setVisible(true);
         }
     });
-    connect(fileHandler, &FileHandler::cancelled, this, [this](){
-        QApplication::quit();
-    });
+    connect(fileHandler, &FileHandler::cancelled, this, [this](){QApplication::quit();});
 }
 
 void MainWindow::installApplication(QDir sourceDir, QDir targetDir)
@@ -268,10 +262,41 @@ void MainWindow::installApplication(QDir sourceDir, QDir targetDir)
         qDebug()<<"Target file_count = "<<targetFileCount<<"(from getFileCountRecursive)";
     }
 
-    progressBar->setRange(0, sourceFileCount + targetFileCount-1+2); //first we will do backup, then copy so max is both operations
+    progressBar->setRange(0, sourceFileCount + targetFileCount-1); //first we will do backup, then copy so max is both operations
 
     QThreadPool::globalInstance()->start([this, targetDir, sourceDir](){
-        fileHandler->copyDirectoryRecursively(sourceDir, targetDir);
+        //create backup folder
+
+        QDir parentDir = targetDir;
+        parentDir.cdUp();
+        QString backupName = targetDir.dirName() + "_backup_" + QUuid::createUuid().toString(QUuid::Id128);
+        QDir backupDir = parentDir.filePath(backupName);
+        qDebug()<<"Creating a backup in:"<<backupDir;
+        if(backupDir.exists())
+            backupDir.removeRecursively();
+        parentDir.mkdir(backupName);
+
+        logMessage("CREATING BACKUP...", Qt::green);
+        bool copySuccess = false;
+        bool backupSuccess = fileHandler->copyDirectoryRecursively(targetDir, backupDir);
+        logMessage("BACKUP"+QString((backupSuccess ? " SUCCESS" : " FAILED, ABORTING...")), backupSuccess ? Qt::green : Qt::red);
+        if(backupSuccess)
+        {
+            logMessage("INSTALLING FILES...", Qt::green);
+            if(fileHandler->copyDirectoryRecursively(sourceDir, targetDir))
+                copySuccess = true;
+            else
+            {
+                QDir temp = targetDir;
+                QString originalName = targetDir.dirName();
+                temp.removeRecursively();
+                parentDir.rename(backupDir.dirName(), originalName);
+            }
+            logMessage("INSTALLATION"+QString((copySuccess ? " SUCCESS" : " FAILED")), copySuccess ? Qt::green : Qt::red);
+        }
+        if(backupDir.exists())
+            backupDir.removeRecursively();
+        emit processFinished(copySuccess);
     });
 }
 
@@ -285,40 +310,109 @@ void MainWindow::updateApplication(QDir sourceDir, QDir targetDir)
     else
     {
         //FIND FILE DIFFIRENCES
-        QStringList diffirentFiles;
         sourceInfo->beginGroup("FILE_HASHES");
         targetInfo->beginGroup("FILE_HASHES");
         QStringList sourceFiles = sourceInfo->allKeys();
         QStringList targetFiles = targetInfo->allKeys();
 
+
         //Get new files that are diffirent or new
-        int newFiles = 0;
+        QStringList diffirentFiles;
         for(auto file : sourceFiles)
-        {
-            if(!targetInfo->contains(file))
-                newFiles++;
             if(sourceInfo->value(file) != targetInfo->value(file))
                 diffirentFiles.append(file.replace("|", "/"));
-        }
-        //Get files that no longer exist in new version
+
+        //Get files to backup
+        QStringList backupFiles;
+        for(const auto& relPath : diffirentFiles)
+            if(QFile::exists(targetDir.filePath(relPath)))
+                backupFiles.append(relPath);
+
+        //Get files that no longer exist in new version, we are not removing folders,
+        // TODO: check for folders that are not in sourceDir, or maybe hash folders too!
         QStringList filesToRemove;
         for(auto file : targetFiles)
             if(!sourceInfo->contains(file))
                 filesToRemove.append(file.replace("|", "/"));
 
-        int filesToBackup = diffirentFiles.count()-newFiles;
-        progressBar->setRange(0, diffirentFiles.count()+filesToBackup+filesToRemove.count()-1+2);
+        progressBar->setRange(0, diffirentFiles.count()+backupFiles.count()+filesToRemove.count()-1);
 
         //COPY AND REMOVE FILES
-        QThreadPool::globalInstance()->start([this, targetDir, sourceDir, diffirentFiles, filesToRemove](){
-            if(fileHandler->copyFiles(sourceDir, targetDir, diffirentFiles))
-            {
-                if(!fileHandler->removeFiles(targetDir, filesToRemove))
-                    qWarning()<<"Failed to remove some files!";
+        qDebug()<<"Copying files:\n"<<diffirentFiles<<"\n";
+        qDebug()<<"Removing files:\n"<<filesToRemove<<"\n";
+        QThreadPool::globalInstance()->start([this, targetDir, sourceDir, diffirentFiles,
+                                              filesToRemove, backupFiles](){
+            //create backup folder
+            QString uniqueFolderName = "backup" + QUuid::createUuid().toString(QUuid::Id128);
+            QDir backupDir = targetDir.filePath(uniqueFolderName);
+            qDebug()<<"Creating a backup in:"<<uniqueFolderName;
+            if(backupDir.exists())
+                backupDir.removeRecursively();
+            targetDir.mkdir(uniqueFolderName);
 
-                emit fileHandler->copyFinished(true);
+            //perform backup and abort if failed
+            bool copySuccess = false;
+            logMessage("CREATING BACKUP...", Qt::green);
+            bool backupSuccess = fileHandler->copyFiles(targetDir, backupDir, backupFiles, true);
+            logMessage("BACKUP"+QString((backupSuccess ? " SUCCESS" : " FAILED, ABORTING...")), backupSuccess ? Qt::green : Qt::red);
+            if(backupSuccess)
+            {
+                if(fileHandler->copyFiles(sourceDir, targetDir, diffirentFiles, true))
+                {
+                    if(!fileHandler->removeFiles(targetDir, filesToRemove))
+                        qWarning()<<"Failed to remove some files!";
+                    copySuccess = true;
+                }
+                else
+                    fileHandler->copyFiles(backupDir, targetDir, backupFiles, false);
+                logMessage("INSTALLATION"+QString((copySuccess ? " SUCCESS" : " FAILED")), copySuccess ? Qt::green : Qt::red);
             }
-            emit fileHandler->copyFinished(false);
+            if(backupDir.exists())
+                backupDir.removeRecursively();
+            emit processFinished(copySuccess);
         });
     }
+}
+
+void MainWindow::logMessage(QString msg, QColor color)
+{
+    QScrollBar* vScroll = logBox->verticalScrollBar();
+    bool atBottom = (vScroll->value() == vScroll->maximum());
+
+    QTextCharFormat format;
+    format.setForeground(color);
+
+    QTextCursor cursor = logBox->textCursor();
+    cursor.movePosition(QTextCursor::End);
+
+    QFontMetrics metrics(logBox->font());
+    int maxWidth = logBox->viewport()->width();
+    QString elidedText = metrics.elidedText(msg, Qt::ElideLeft, maxWidth);
+
+    cursor.insertText("\n"+elidedText, format);
+
+    if (atBottom)
+        vScroll->setValue(vScroll->maximum());
+}
+
+bool MainWindow::launchApp(QDir appDirectory, QStringList args)
+{
+    bool success = false;
+    if(sourceInfo && sourceInfo->contains("SETTINGS/app_exe"))
+    {
+        QString relativeAppPath = sourceInfo->value("SETTINGS/app_exe").toString();
+
+
+        QString absolutePath = appDirectory.absoluteFilePath(relativeAppPath);
+        if(QFile::exists(absolutePath))
+        {
+            qDebug()<<"Launching application"<<absolutePath;
+            success = QProcess::startDetached(absolutePath, args);
+            if(!success)
+                qWarning() << "Failed to start"<<absolutePath;
+        }
+        else
+            qWarning()<<"Cannot find app_exe="<<relativeAppPath<<" in destination/target directory="<<appDirectory.absolutePath()<<"after copy operation";
+    }
+    return success;
 }

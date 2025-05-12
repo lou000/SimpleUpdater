@@ -12,6 +12,7 @@ bool checkRequired(const QCommandLineParser& parser, const QCommandLineOption& d
     if(parser.isSet(dependent) && !parser.isSet(required))
     {
         QTextStream(stderr)<<"Error: --"<<dependent.names().first()<<" requires --"<<required.names().first()<<" to also be set.\n";
+        exit(0);
         return false;
     }
     return true;
@@ -30,6 +31,7 @@ bool checkRequiredOneOf(const QCommandLineParser& parser, const QCommandLineOpti
     for(const QCommandLineOption& opt : options)
         QTextStream(stderr)<<" --"<<opt.names().first();
     QTextStream(stderr)<<'\n';
+    exit(0);
     return false;
 }
 
@@ -38,6 +40,7 @@ bool checkExclusive(const QCommandLineParser& parser, const QCommandLineOption& 
     if(parser.isSet(a) && parser.isSet(b))
     {
         QTextStream(stderr)<<"Error: --"<<a.names().first()<<" and --" <<b.names().first()<<" cannot be used together.\n";
+        exit(0);
         return false;
     }
     return true;
@@ -55,13 +58,12 @@ int main(int argc, char *argv[])
     parser.addVersionOption();
 
     QCommandLineOption updateMode(QStringList()<<"u"<<"update",
-                                      "Sets the operating mode to update.",
-                                      "path/to/source");
+                                  "Sets the operating mode to update.");
     parser.addOption(updateMode);
 
     QCommandLineOption sourceLocation(QStringList()<<"s"<<"source",
-                                  "Source location of the update. Required in update mode, in generate mode defaults to current directory.",
-                                  "path/to/source");
+                                      "Source location of the update. Required in update mode, in generate mode defaults to current directory.",
+                                      "path/to/source");
     parser.addOption(sourceLocation);
 
     QCommandLineOption targetLocation(QStringList()<<"t"<<"target",
@@ -98,6 +100,7 @@ int main(int argc, char *argv[])
     parser.addOption(applicationExe);
     parser.process(a);
 
+    qDebug()<<"NEW VERSION";
     // cant be in updateMode and generateInfo
     checkExclusive(parser, updateMode, generateInfo);
 

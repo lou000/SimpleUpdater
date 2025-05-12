@@ -5,14 +5,15 @@
 #include <QObject>
 #include <QVersionNumber>
 
+//TODO: decouple copyfinished from here!, move backups to main application, TESTING
 class QSettings;
 class FileHandler : public QObject {
     Q_OBJECT
 public:
     explicit FileHandler(QObject* parent = nullptr);
 
-    void copyDirectoryRecursively(QDir source, QDir target);
-    bool copyFiles(QDir source, QDir target, QStringList filePaths);
+    bool copyDirectoryRecursively(QDir source, QDir target);
+    bool copyFiles(QDir source, QDir target, QStringList filePaths, bool cancelable);
     bool removeFiles(QDir dir, QStringList filePaths);
     static int getFileCountRecursive(const QDir &source);
     static QByteArray hashFile(QFile& file);
@@ -24,14 +25,12 @@ public slots:
 
 signals:
     void progressUpdated(QPair<QString, bool> success);
-    void copyFinished(bool success);
     void cancelled();
 
 private:
     std::atomic<bool> cancelRequested = false;
     std::atomic<bool> canceled = false;
     bool _copyDirectoryRecursively(const QDir &source, const QDir &target, QSet<QString>* visited);
-    bool _copyFiles(QDir source, QDir target, QStringList filePaths, bool cancelable);
 };
 
 

@@ -30,7 +30,7 @@ private:
     QPushButton* browseButton;
     QProgressBar* progressBar;
     QTextEdit* logBox;
-    QPushButton* updateLater;
+    QPushButton* updateLaterButton;
     QPushButton* cancelButton;
     QPushButton* continueButton;
     QPushButton* quitButton;
@@ -38,5 +38,12 @@ private:
     FileHandler* fileHandler;
     std::optional<QSettings> sourceInfo;
     std::optional<QSettings> targetInfo;
+
+signals:
+    void processFinished(bool success);
+
+private slots:
+    void logMessage(QString msg, QColor color);
+    bool launchApp(QDir appDirectory, QStringList args);
 };
 #endif // MAINWINDOW_H
