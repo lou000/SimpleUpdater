@@ -3,6 +3,7 @@
 
 #include <QDir>
 #include <QMainWindow>
+#include <QSettings>
 
 class QPushButton;
 class QLineEdit;
@@ -15,12 +16,11 @@ class MainWindow : public QMainWindow
     Q_OBJECT
 
 public:
-    MainWindow(const QDir& sourceLocation, const QDir& targetLocation, const QString &originalApplication,
-               bool fullUpdate, bool installation, QWidget *parent = nullptr);
+    MainWindow(const std::optional<QDir>& sourceLocation, const std::optional<QDir>& targetLocation, QWidget *parent = nullptr);
 
 private:
-    void installApplication(const QDir &dir);
-    void updateApplication();
+    void installApplication(QDir sourceDir, QDir targetDir);
+    void updateApplication(QDir sourceDir, QDir targetDir);
 
     QStackedWidget* stackedWidget;
     QWidget* installScreen;
@@ -32,13 +32,11 @@ private:
     QTextEdit* logBox;
     QPushButton* updateLater;
     QPushButton* cancelButton;
-    QPushButton* proceedButton;
+    QPushButton* continueButton;
+    QPushButton* quitButton;
 
     FileHandler* fileHandler;
-    QDir sourceLocation;
-    QDir targetLocation;
-    QString originalApplication;
-    bool fullUpdate;
-    bool forcedUpdate;
+    std::optional<QSettings> sourceInfo;
+    std::optional<QSettings> targetInfo;
 };
 #endif // MAINWINDOW_H

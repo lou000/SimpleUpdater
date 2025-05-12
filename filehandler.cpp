@@ -87,8 +87,13 @@ bool FileHandler::_copyDirectoryRecursively(const QDir& source, const QDir& targ
         }
         else if(entry.isFile())
         {
-            if(!FileHandler::copyFileSafely(srcFilePath, tgtFilePath))
+            if(QFile::exists(tgtFilePath))
+                QFile::remove(tgtFilePath);
+            if(!QFile::copy(srcFilePath, tgtFilePath))
+            {
+                qWarning()<<"Failed to copy"<<srcFilePath<<"to"<<tgtFilePath;
                 success = false;
+            }
             visited->insert(srcFilePath);
             emit progressUpdated({srcFilePath, success});
         }
@@ -114,27 +119,87 @@ bool FileHandler::_copyDirectoryRecursively(const QDir& source, const QDir& targ
     return success;
 }
 
-void FileHandler::copyDirectoryRecursively(const QDir &source, const QDir &target)
+void FileHandler::copyDirectoryRecursively(QDir source, QDir target)
 {
     QSet<QString> visited;
-    qDebug()<<source<<target;
-    bool success = _copyDirectoryRecursively(source, target, &visited);
+
+    QDir parentDir = target;
+    parentDir.cdUp();
+    QString backupName = target.dirName() + "_backup";
+    QDir backupDir = parentDir.filePath(backupName);
+    if (!backupDir.exists())
+        parentDir.mkdir(backupName);
+
+    emit progressUpdated({"STARTING BACKUP", true});
+    bool backupSuccess = _copyDirectoryRecursively(target, backupDir, &visited);
+    emit progressUpdated({"BACKUP COMPLETE", backupSuccess});
+    visited.clear();
+    qDebug()<<backupSuccess;
+    bool success = false;
+    if(backupSuccess)
+    {
+        success = _copyDirectoryRecursively(source, target, &visited);
+        if(!success)
+        {
+            target.removeRecursively();
+            parentDir.rename(backupDir.dirName(), target.dirName());
+        }
+    }
+    if(backupDir.exists())
+        backupDir.removeRecursively();
+
     emit copyFinished(success);
 }
 
-void FileHandler::copyFiles(const QDir &source, const QDir &target, QList<QString> filePaths)
+bool FileHandler::copyFiles(QDir source, QDir target, QStringList filePaths)
 {
-    for (const QString& relPath : filePaths)
+    //create backup folder
+    QDir backupDir = target.filePath("update_backup");
+    if(backupDir.exists())
+        backupDir.removeRecursively();
+    target.mkdir("update_backup");
+
+    // backup files
+    QStringList backupFiles;
+    for(const auto& relPath : filePaths)
+        if(QFile::exists(target.filePath(relPath)))
+            backupFiles.append(relPath);
+
+    emit progressUpdated({"STARTING BACKUP", true});
+    bool backupSuccess = _copyFiles(target, backupDir, backupFiles, true);
+    emit progressUpdated({"BACKUP COMPLETE", backupSuccess});
+
+    if(!backupSuccess)
     {
-        if (cancelRequested.load())
+        backupDir.removeRecursively();
+        emit copyFinished(false);
+        return false;
+    }
+    //update files
+    bool updateSuccess = _copyFiles(source, target, filePaths, true);
+
+    //restore backup if update failed
+    if(!updateSuccess)
+        _copyFiles(backupDir, target, backupFiles, false);
+    if(backupDir.exists())
+        backupDir.removeRecursively();
+
+    return updateSuccess;
+}
+
+bool FileHandler::_copyFiles(QDir source, QDir target, QStringList filePaths, bool cancelable)
+{
+    bool updateSuccess = true;
+    for(const auto& relPath : filePaths)
+    {
+        if (cancelRequested.load() && cancelable)
         {
             if (!canceled.load())
             {
                 emit cancelled();
                 canceled.store(true);
             }
-            emit copyFinished(false);
-            return;
+            return false;
         }
 
         QString srcPath = source.filePath(relPath);
@@ -144,7 +209,7 @@ void FileHandler::copyFiles(const QDir &source, const QDir &target, QList<QStrin
         if (!srcInfo.exists())
         {
             qWarning() << "File does not exist:" << srcPath;
-            emit progressUpdated({srcPath, false});
+            emit progressUpdated({srcPath+" (COPY)", false});
             continue;
         }
 
@@ -152,18 +217,20 @@ void FileHandler::copyFiles(const QDir &source, const QDir &target, QList<QStrin
         if (!tgtDir.exists() && !tgtDir.mkpath("."))
         {
             qWarning() << "Failed to create target subdirectory for" << tgtPath;
-            emit progressUpdated({srcPath, false});
+            emit progressUpdated({srcPath+" (COPY)", false});
             continue;
         }
 
-        bool success = FileHandler::copyFileSafely(srcPath, tgtPath);
-        QThread::msleep(5);
-        emit progressUpdated({srcPath, success});
+        QFile::remove(tgtPath);
+        bool success = QFile::copy(srcPath, tgtPath);
+        emit progressUpdated({srcPath+" (COPY)", success});
+        if(!success)
+            updateSuccess = false;
     }
-    emit copyFinished(true);
+    return updateSuccess;
 }
 
-int FileHandler::getNumberOfFilesRecursive(const QDir &source)
+int FileHandler::getFileCountRecursive(const QDir &source)
 {
     int files = 0;
     std::function<void(const QDir&)> collectFiles = [&](const QDir& dir) {
@@ -192,21 +259,21 @@ QByteArray FileHandler::hashFile(QFile &file)
     return hash.result();
 }
 
-void FileHandler::generateInfoFile(const QDir& directory, const QVersionNumber& version)
+void FileHandler::generateInfoFile(const QDir& directory, const QVersionNumber &version,
+                                   const QString& appExe, bool full, bool force)
 {
     //Remove old file if it exists
     auto updateInfo = QSettings("updateInfo.ini", QSettings::IniFormat);
     QStringList groups = updateInfo.childGroups();
 
-    if(!groups.contains("SETTINGS"))
-    {
-        updateInfo.beginGroup("SETTINGS");
-        updateInfo.setValue("app_version", QString());
-        updateInfo.setValue("force_update", false);
-        updateInfo.setValue("full_update", false);
-        updateInfo.setValue("file_count", 0);
-        updateInfo.endGroup();
-    }
+    updateInfo.beginGroup("SETTINGS");
+    updateInfo.setValue("app_version", version.toString());
+    updateInfo.setValue("app_exe", appExe);
+    updateInfo.setValue("full_update", full);
+    updateInfo.setValue("force_update", force);
+    updateInfo.setValue("file_count", 0);
+    updateInfo.endGroup();
+
     if(groups.contains("FILE_HASHES"))
         updateInfo.remove("FILE_HASHES");
 
@@ -238,30 +305,4 @@ void FileHandler::generateInfoFile(const QDir& directory, const QVersionNumber& 
     hashFileRecursive(directory);
     updateInfo.endGroup();
     updateInfo.setValue("SETTINGS/file_count", fileCount);
-
-    if(!version.isNull() || version.segmentCount() == 0)
-        updateInfo.setValue("SETTINGS/app_version", version.toString());
-}
-
-bool FileHandler::copyFileSafely(const QString &src, const QString &dst)
-{
-    QString backup = dst + ".bak";
-    if (QFile::exists(dst)) {
-        QFile::remove(backup);
-        if (!QFile::rename(dst, backup))
-        {
-            qWarning()<<"Failed to backup existing file:"<<dst;
-            return false;
-        }
-    }
-
-    if (!QFile::copy(src, dst))
-    {
-        QFile::rename(backup, dst);
-        qWarning()<<"Failed to copy"<<src<<"to"<<dst<<"restoring backup...";
-        return false;
-    }
-
-    QFile::remove(backup);
-    return true;
 }

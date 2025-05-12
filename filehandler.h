@@ -11,12 +11,13 @@ class FileHandler : public QObject {
 public:
     explicit FileHandler(QObject* parent = nullptr);
 
-    void copyDirectoryRecursively(const QDir &source, const QDir &target);
-    void copyFiles(const QDir &source, const QDir &target, QList<QString> filePaths);
-    static bool copyFileSafely(const QString& src, const QString& dst);
-    static int getNumberOfFilesRecursive(const QDir &source);
+    void copyDirectoryRecursively(QDir source, QDir target);
+    bool copyFiles(QDir source, QDir target, QStringList filePaths);
+    bool removeFiles(QDir dir, QStringList filePaths);
+    static int getFileCountRecursive(const QDir &source);
     static QByteArray hashFile(QFile& file);
-    static void generateInfoFile(const QDir& directory, const QVersionNumber &version);
+    static void generateInfoFile(const QDir& directory, const QVersionNumber &version,
+                                 const QString& appExe, bool full, bool force);
 
 public slots:
     void cancel(){cancelRequested.store(true);}
@@ -30,6 +31,7 @@ private:
     std::atomic<bool> cancelRequested = false;
     std::atomic<bool> canceled = false;
     bool _copyDirectoryRecursively(const QDir &source, const QDir &target, QSet<QString>* visited);
+    bool _copyFiles(QDir source, QDir target, QStringList filePaths, bool cancelable);
 };
 
 

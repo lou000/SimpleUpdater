@@ -5,6 +5,43 @@
 #include <QStyleHints>
 #include <QVersionNumber>
 #include "filehandler.h"
+#include <QTextStream>
+
+bool checkRequired(const QCommandLineParser& parser, const QCommandLineOption& dependent, const QCommandLineOption& required)
+{
+    if(parser.isSet(dependent) && !parser.isSet(required))
+    {
+        QTextStream(stderr)<<"Error: --"<<dependent.names().first()<<" requires --"<<required.names().first()<<" to also be set.\n";
+        return false;
+    }
+    return true;
+}
+
+bool checkRequiredOneOf(const QCommandLineParser& parser, const QCommandLineOption& dependent, const QList<QCommandLineOption>& options)
+{
+    if(!parser.isSet(dependent))
+        return true;
+
+    for(const QCommandLineOption& opt : options)
+        if(parser.isSet(opt))
+            return true;
+
+    QTextStream(stderr)<<"Error: At least one of the following options must be set with"<<dependent.names().first()<<":";
+    for(const QCommandLineOption& opt : options)
+        QTextStream(stderr)<<" --"<<opt.names().first();
+    QTextStream(stderr)<<'\n';
+    return false;
+}
+
+bool checkExclusive(const QCommandLineParser& parser, const QCommandLineOption& a, const QCommandLineOption& b)
+{
+    if(parser.isSet(a) && parser.isSet(b))
+    {
+        QTextStream(stderr)<<"Error: --"<<a.names().first()<<" and --" <<b.names().first()<<" cannot be used together.\n";
+        return false;
+    }
+    return true;
+}
 
 int main(int argc, char *argv[])
 {
@@ -17,80 +54,104 @@ int main(int argc, char *argv[])
     parser.addHelpOption();
     parser.addVersionOption();
 
+    QCommandLineOption updateMode(QStringList()<<"u"<<"update",
+                                      "Sets the operating mode to update.",
+                                      "path/to/source");
+    parser.addOption(updateMode);
+
     QCommandLineOption sourceLocation(QStringList()<<"s"<<"source",
-                                  "Source location of the update.",
+                                  "Source location of the update. Required in update mode, in generate mode defaults to current directory.",
                                   "path/to/source");
     parser.addOption(sourceLocation);
 
     QCommandLineOption targetLocation(QStringList()<<"t"<<"target",
-                                      "Target location of the update. If empty then target is application directory.",
+                                      "Target location of the update. If empty then target is current directory.",
                                       "path/to/source");
     parser.addOption(targetLocation);
 
-    QCommandLineOption forceFullUpdate(QStringList()<<"f"<<"full",
-                                  "Forces complete update even if only couple files changed.");
-    parser.addOption(forceFullUpdate);
-
-    QCommandLineOption applicationExe(QStringList()<<"e"<<"exe",
-                                       "Original application executable, if not set the updater will not relaunch the original application.",
-                                       "path/to/exe");
-    parser.addOption(applicationExe);
-
     QCommandLineOption generateInfo(QStringList()<<"g"<<"generate",
-                                      "Generate updateInfo.ini with settings and hashes for all the files in source directory recursively."
-                                      "If source is not set application will use current directory."
-                                      "Should be used inside the update directory.");
+                                      "Sets the operating mode to generate. "
+                                      "Generates updateInfo.ini with settings and hashes for all the files in source directory recursively. "
+                                      "If source is not set application will use current directory.");
     parser.addOption(generateInfo);
 
-    QCommandLineOption version(QStringList()<<"u"<<"update_version",
-                                    "Sets a version of the update, to be used with -g/-generate, does nothing by itself",
+    QCommandLineOption version(QStringList()<<"app_version",
+                                    "Sets a version of the update in updateInfo.ini file. Used only with -g/-generate. Does nothing by itself.",
                                     "d.d.d");
     parser.addOption(version);
+
+    QCommandLineOption fullUpdate(QStringList()<<"full_update",
+                                  "Sets a flag in updateInfo.ini file that forces complete update even if only couple files changed. "
+                                  "Used only with -g/-generate. Does nothing by itself.");
+    parser.addOption(fullUpdate);
+
+    QCommandLineOption forceUpdate(QStringList()<<"force_update",
+                                   "Sets a flag in updateInfo.ini file that forces the update. "
+                                   "Normally user has a choice to postpone the update, this flag disables this choice.");
+    parser.addOption(forceUpdate);
+
+    QCommandLineOption applicationExe(QStringList()<<"app_exe",
+                                      "Sets a path relative to source location of updated application executable in updateInfo.ini. "
+                                      "If not set the updater/installer will not relaunch the original application. "
+                                      "Used only with -g/-generate. Does nothing by itself.",
+                                      "path/to/exe");
+    parser.addOption(applicationExe);
     parser.process(a);
 
-    QDir sourceDir;
+    // cant be in updateMode and generateInfo
+    checkExclusive(parser, updateMode, generateInfo);
+
+    //source location is required in update mode
+    checkRequired(parser, updateMode, sourceLocation);
+
+    // target location can only be used with updateMode
+    checkRequired(parser, targetLocation, updateMode);
+
+    //source location can be used with either updateMode or generateInfo but not by itself
+    checkRequiredOneOf(parser, sourceLocation, {updateMode, generateInfo});
+
+    // version is required when generating info
+    checkRequired(parser, generateInfo, version);
+
+    //options that require generateInfo to be set
+    checkRequired(parser, version, generateInfo);
+    checkRequired(parser, fullUpdate, generateInfo);
+    checkRequired(parser, forceUpdate, generateInfo);
+    checkRequired(parser, applicationExe, generateInfo);
+
+    std::optional<QDir> sourceDir;
     if(parser.isSet(sourceLocation))
     {
         QString sourcePath = parser.value(sourceLocation);
-        sourceDir = QDir(sourcePath);
-        if(!sourceDir.exists() || !sourceDir.isReadable())
+        auto dir = QDir(sourcePath);
+        if(dir.exists() && dir.isReadable())
+            sourceDir = dir;
+        else
         {
             qCritical()<<"Source location"<<sourcePath<<"is either invalid or not accesible!";
             return 1;
         }
     }
 
-    QDir targetDir;
+    std::optional<QDir> targetDir;
     if(parser.isSet(targetLocation))
     {
         QString targetPath = parser.value(targetLocation);
-        targetDir = QDir(targetPath);
-        if(!targetDir.exists() || !targetDir.isReadable())
+        auto dir = QDir(targetPath);
+        if(dir.exists() && dir.isReadable())
+            targetDir = dir;
+        else
         {
             qCritical()<<"Target location"<<targetPath<<"is either invalid or not accesible!";
-            return 1;
-        }
-    }
-    else
-        targetDir = QApplication::applicationDirPath();
-
-    QString originalApp = "";
-    if(parser.isSet(applicationExe))
-    {
-        QString appPath = parser.value(applicationExe);
-        auto file = new QFile(appPath);
-        if(file->exists() || file->permissions() & QFile::ExeUser)
-        {
-            qCritical()<<"Error: Original application executable is not reachable or launching it is not permitted.";
             return 1;
         }
     }
 
     if(parser.isSet(generateInfo))
     {
-        QDir dir = QApplication::applicationDirPath();
-        if(parser.isSet(sourceLocation))
-            dir = sourceDir;
+        QDir dir = QDir();
+        if(sourceDir)
+            dir = sourceDir.value();
 
         QVersionNumber v;
         if(parser.isSet(version))
@@ -103,23 +164,29 @@ int main(int argc, char *argv[])
                 return 1;
             }
         }
+
+        QString appExe = "";
+        if(parser.isSet(applicationExe))
+        {
+            appExe = parser.value(applicationExe);
+            if(!dir.exists(appExe))
+            {
+                qCritical()<<"Error: Application executable"<<dir.absoluteFilePath(appExe)<<"set in --app_exe is not reachable.";
+                return 1;
+            }
+        }
+
+        bool full = parser.isSet(fullUpdate);
+        bool force = parser.isSet(forceUpdate);
+
+
         qDebug()<<"Generating updateInfo.ini for";
         qDebug()<<"Hashing files...";
-        FileHandler::generateInfoFile(dir, v);
+        FileHandler::generateInfoFile(dir, v, appExe, full, force);
         return 0;
     }
 
-    // If installation is true then the application will proceed to ask for target filepath and then recursively copy
-    // all files from current application directory to that location
-    bool installation = parser.optionNames().isEmpty();
-    if(!installation)   //sanity check
-        if(!sourceDir.exists())
-        {
-            qCritical()<<"Need source location to perform the update!";
-            return 1;
-        }
-
-    MainWindow w(sourceDir, targetDir, originalApp, parser.isSet(forceFullUpdate), installation);
+    MainWindow w(sourceDir, targetDir);
     w.show();
     return a.exec();
 }
