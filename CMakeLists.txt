@@ -5,12 +5,26 @@ find_package(Qt6 6.5 REQUIRED COMPONENTS Core Widgets)
 
 qt_standard_project_setup()
 
-qt_add_executable(SimpleUpdater
-    WIN32 MACOSX_BUNDLE
+set(SOURCES
     main.cpp
     mainwindow.cpp
     mainwindow.h
     filehandler.h filehandler.cpp
+    desktopshortcut.h
+)
+if(WIN32)
+    list(APPEND SOURCES
+        desktopshortcut_win.h
+    )
+elseif(UNIX AND NOT APPLE)
+    list(APPEND SOURCES
+        desktopshortcut_linux.h
+    )
+endif()
+
+qt_add_executable(SimpleUpdater
+    WIN32 MACOSX_BUNDLE
+    ${SOURCES}
 )
 
 target_link_libraries(SimpleUpdater

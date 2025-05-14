@@ -17,26 +17,30 @@
 #include <QThreadPool>
 #include <QScrollBar>
 #include <QUuid>
+#include "desktopshortcut.h"
 
-MainWindow::MainWindow(const std::optional<QDir>& sourceLocation, const std::optional<QDir>& targetLocation, QWidget *parent)
+
+MainWindow::MainWindow(std::optional<QDir> sourceLocation, std::optional<QDir> targetLocation,
+                       bool installation, QWidget *parent)
     : QMainWindow(parent), fileHandler(new FileHandler(this))
 {
+    if(installation)
+        sourceLocation = sourceLocation ? sourceLocation : QDir();
+    else
+        targetLocation = targetLocation ? targetLocation : QDir();
+
 
     if(sourceLocation)
-        if(sourceLocation->exists("updateInfo.ini"))
-            sourceInfo.emplace(sourceLocation->filePath("updateInfo.ini"), QSettings::IniFormat);
-
+    {
+        if(!sourceLocation->exists("updateInfo.ini"))
+            FileHandler::generateInfoFile(sourceLocation.value(), {}, {}, true, false);
+        sourceInfo.emplace(sourceLocation->filePath("updateInfo.ini"), QSettings::IniFormat);
+    }
     if(targetLocation)
     {
         if(!targetLocation->exists("updateInfo.ini"))
             FileHandler::generateInfoFile(targetLocation.value(), {}, {}, false, false);
         targetInfo.emplace(targetLocation->filePath("updateInfo.ini"), QSettings::IniFormat);
-    }
-    else
-    {
-        if(!QDir().exists("updateInfo.ini"))
-            FileHandler::generateInfoFile(QDir(), {}, {}, false, false);
-        targetInfo.emplace(QDir().filePath("updateInfo.ini"), QSettings::IniFormat);
     }
 
     bool forceUpdate = true;
@@ -84,6 +88,7 @@ MainWindow::MainWindow(const std::optional<QDir>& sourceLocation, const std::opt
     QString oldVersion = targetInfo ? targetInfo->value("SETTINGS/app_version").toString() : "?.?.?";
     QString newVersion = sourceInfo ? sourceInfo->value("SETTINGS/app_version").toString() : "?.?.?";
     QString appName = sourceInfo ? sourceInfo->value("SETTINGS/app_exe").toString() : "Your application";
+    qDebug()<<"Application name:"<<appName<<newVersion;
     if(appName.isEmpty())
         appName = "Your application";
     QString forceUpdateText = "This update is mandatory and cannot be skipped!";
@@ -141,11 +146,10 @@ MainWindow::MainWindow(const std::optional<QDir>& sourceLocation, const std::opt
     centralWidget->setLayout(mainLayout);
     setCentralWidget(centralWidget);
 
-    bool installation = false;
-    if(!sourceLocation && !targetLocation)
+    if(installation)
     {
-        installation = true;
         stackedWidget->setCurrentIndex(0);
+        updateLaterButton->setVisible(false);
     }
     else
         stackedWidget->setCurrentIndex(1);
@@ -208,8 +212,10 @@ MainWindow::MainWindow(const std::optional<QDir>& sourceLocation, const std::opt
     });
 
     connect(this, &MainWindow::processFinished, this, [this, targetLocation, installation](bool success){
+        QString operation = installation ? "INSTALLATION" : "UPDATE";
         if(!success)
         {
+            logMessage(operation + " FAILED", Qt::red);
             QMessageBox::critical(this, tr("Copy failed!"),
                                   tr("Installation/update process failed, "
                                   "please refer to log to see what files were not possible to copy succesfully."));
@@ -219,6 +225,7 @@ MainWindow::MainWindow(const std::optional<QDir>& sourceLocation, const std::opt
         }
         else
         {
+            logMessage(operation + " COMPLETE", Qt::green);
             QDir dir;
             if(installation)
                 dir = pathEdit->text();
@@ -272,7 +279,7 @@ void MainWindow::installApplication(QDir sourceDir, QDir targetDir)
         parentDir.cdUp();
         QString backupName = targetDir.dirName() + "_backup_" + QUuid::createUuid().toString(QUuid::Id128);
         QDir backupDir = parentDir.filePath(backupName);
-        qDebug()<<"Creating a backup in:"<<backupDir;
+        qDebug()<<"Creating a backup in:"<<backupDir.absolutePath();
         if(backupDir.exists())
             backupDir.removeRecursively();
         parentDir.mkdir(backupName);
@@ -293,10 +300,6 @@ void MainWindow::installApplication(QDir sourceDir, QDir targetDir)
                 temp.removeRecursively();
                 parentDir.rename(backupDir.dirName(), originalName);
             }
-            QMetaObject::invokeMethod(this, [this, copySuccess]() {
-                logMessage("INSTALLATION" + QString(copySuccess ? " SUCCESS" : " FAILED"),
-                           copySuccess ? Qt::green : Qt::red);
-            }, Qt::QueuedConnection);
         }
         if(backupDir.exists())
             backupDir.removeRecursively();
@@ -369,10 +372,6 @@ void MainWindow::updateApplication(QDir sourceDir, QDir targetDir)
                 }
                 else
                     fileHandler->copyFiles(backupDir, targetDir, backupFiles, false);
-                QMetaObject::invokeMethod(this, [this, copySuccess]() {
-                    logMessage("UPDATE" + QString(copySuccess ? " SUCCESS" : " FAILED"),
-                               copySuccess ? Qt::green : Qt::red);
-                }, Qt::QueuedConnection);
             }
             if(backupDir.exists())
                 backupDir.removeRecursively();
@@ -411,8 +410,13 @@ bool MainWindow::launchApp(QDir appDirectory, QStringList args)
 
 
         QString absolutePath = appDirectory.absoluteFilePath(relativeAppPath);
-        if(QFile::exists(absolutePath))
+        auto fileInfo = QFileInfo(absolutePath);
+        if(fileInfo.exists())
         {
+            qDebug()<<"Creating shortcut for"<<absolutePath;
+            if(!createShortcut(absolutePath, fileInfo.completeBaseName()))
+                qDebug()<<"Failed to create shortcut!";
+
             qDebug()<<"Launching application"<<absolutePath;
             success = QProcess::startDetached(absolutePath, args);
             if(!success)

@@ -110,9 +110,6 @@ int main(int argc, char *argv[])
     // target location can only be used with updateMode
     checkRequired(parser, targetLocation, updateMode);
 
-    //source location can be used with either updateMode or generateInfo but not by itself
-    checkRequiredOneOf(parser, sourceLocation, {updateMode, generateInfo});
-
     // version is required when generating info
     checkRequired(parser, generateInfo, version);
 
@@ -121,6 +118,8 @@ int main(int argc, char *argv[])
     checkRequired(parser, fullUpdate, generateInfo);
     checkRequired(parser, forceUpdate, generateInfo);
     checkRequired(parser, applicationExe, generateInfo);
+
+    bool installation = !parser.isSet(updateMode) && !parser.isSet(updateMode);
 
     std::optional<QDir> sourceDir;
     if(parser.isSet(sourceLocation))
@@ -189,7 +188,7 @@ int main(int argc, char *argv[])
         return 0;
     }
 
-    MainWindow w(sourceDir, targetDir);
+    MainWindow w(sourceDir, targetDir, installation);
     w.show();
     return a.exec();
 }

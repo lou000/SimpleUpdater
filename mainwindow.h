@@ -16,7 +16,8 @@ class MainWindow : public QMainWindow
     Q_OBJECT
 
 public:
-    MainWindow(const std::optional<QDir>& sourceLocation, const std::optional<QDir>& targetLocation, QWidget *parent = nullptr);
+    MainWindow(std::optional<QDir> sourceLocation, std::optional<QDir> targetLocation,
+               bool installation, QWidget *parent = nullptr);
 
 private:
     void installApplication(QDir sourceDir, QDir targetDir);
