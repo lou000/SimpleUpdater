@@ -91,9 +91,9 @@ MainWindow::MainWindow(std::optional<QDir> sourceLocation, std::optional<QDir> t
     qDebug()<<"Application name:"<<appName<<newVersion;
     if(appName.isEmpty())
         appName = "Your application";
-    QString forceUpdateText = "This update is mandatory and cannot be skipped!";
+    QString forceUpdateText = "This update can be skipped, press \"Update Later\" to launch application without updating.";
     if(forceUpdate)
-        forceUpdateText = "This update can be skipped, press \"Update Later\" to launch application without updating.";
+        forceUpdateText = "This update is mandatory and cannot be skipped!"+QString::number((int)sourceInfo->value("SETTINGS/force_update").toBool());
     updateLayout->addWidget(new QLabel(tr("%1 (%2) will now be updated to the latest version (%3).\n%4")
                                            .arg(appName, oldVersion, newVersion, forceUpdateText)));
     updateLayout->addStretch();
@@ -138,7 +138,7 @@ MainWindow::MainWindow(std::optional<QDir> sourceLocation, std::optional<QDir> t
     buttonLayout->addWidget(quitButton);
     buttonLayout->addWidget(cancelButton);
     buttonLayout->addWidget(continueButton);
-    updateLaterButton->setVisible(forceUpdate);
+    updateLaterButton->setVisible(!forceUpdate);
     cancelButton->setVisible(false);
 
     mainLayout->addLayout(buttonLayout);
@@ -159,7 +159,8 @@ MainWindow::MainWindow(std::optional<QDir> sourceLocation, std::optional<QDir> t
         QDir dir;
         if(targetLocation)
             dir = targetLocation.value();
-        launchApp(dir, {"-update_skipped"});
+        launchApp(dir, {"--update_skipped"});
+        QApplication::exit(0);
     });
     connect(browseButton, &QPushButton::clicked, this, [this](){
         QString dir = QFileDialog::getExistingDirectory(this, "Select Directory");
@@ -226,6 +227,7 @@ MainWindow::MainWindow(std::optional<QDir> sourceLocation, std::optional<QDir> t
         else
         {
             logMessage(operation + " COMPLETE", Qt::green);
+            progressBar->setValue(progressBar->maximum());
             QDir dir;
             if(installation)
                 dir = pathEdit->text();
@@ -235,8 +237,9 @@ MainWindow::MainWindow(std::optional<QDir> sourceLocation, std::optional<QDir> t
             QThread::msleep(300);
             if(progressBar->maximum()==0)
                 progressBar->hide();
-            if(launchApp(dir, {installation ? "-installation" : "-update"}))
-                QApplication::quit();
+
+            if(auto success = launchApp(dir, {installation ? "--installation" : "--update"})) //TODO: not working
+                void();//QApplication::quit();
             else
                 quitButton->setVisible(true);
         }
@@ -377,6 +380,8 @@ void MainWindow::updateApplication(QDir sourceDir, QDir targetDir)
                 backupDir.removeRecursively();
             emit processFinished(copySuccess);
         });
+        sourceInfo->endGroup();
+        targetInfo->endGroup();
     }
 }
 
@@ -404,26 +409,34 @@ void MainWindow::logMessage(QString msg, QColor color)
 bool MainWindow::launchApp(QDir appDirectory, QStringList args)
 {
     bool success = false;
+    logMessage(QString::number(sourceInfo.has_value())+" "+QString::number(sourceInfo->contains("SETTINGS/app_exe")), Qt::red);
     if(sourceInfo && sourceInfo->contains("SETTINGS/app_exe"))
     {
-        QString relativeAppPath = sourceInfo->value("SETTINGS/app_exe").toString();
-
+        logMessage(appDirectory.absolutePath(), Qt::yellow);
+        QString relativeAppPath = targetInfo->value("SETTINGS/app_exe").toString();
 
         QString absolutePath = appDirectory.absoluteFilePath(relativeAppPath);
         auto fileInfo = QFileInfo(absolutePath);
         if(fileInfo.exists())
         {
-            qDebug()<<"Creating shortcut for"<<absolutePath;
-            if(!createShortcut(absolutePath, fileInfo.completeBaseName()))
-                qDebug()<<"Failed to create shortcut!";
-
+            //TODO: split this function, move this elsewhere
+            // qDebug()<<"Creating shortcut for"<<absolutePath;
+            // if(!createShortcut(absolutePath, fileInfo.completeBaseName()))
+            //     qDebug()<<"Failed to create shortcut!";
+            logMessage(absolutePath, Qt::yellow);
             qDebug()<<"Launching application"<<absolutePath;
             success = QProcess::startDetached(absolutePath, args);
             if(!success)
+            {
+                logMessage("Failed to start "+absolutePath, Qt::yellow);
                 qWarning() << "Failed to start"<<absolutePath;
+            }
         }
         else
-            qWarning()<<"Cannot find app_exe="<<relativeAppPath<<" in destination/target directory="<<appDirectory.absolutePath()<<"after copy operation";
+        {
+            logMessage("Cannot find app_exe= "+relativeAppPath+" in destination/target directory= "+appDirectory.absolutePath()+" after copy operation", Qt::yellow);
+            qWarning()<<"Cannot find app_exe="<<relativeAppPath<<"in destination/target directory="<<appDirectory.absolutePath()<<"after copy operation";
+        }
     }
     return success;
 }

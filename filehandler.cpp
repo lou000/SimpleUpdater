@@ -231,7 +231,8 @@ void FileHandler::generateInfoFile(const QDir& directory, const QVersionNumber &
 
     updateInfo.beginGroup("SETTINGS");
     updateInfo.setValue("app_version", version.toString());
-    updateInfo.setValue("app_exe", appExe);
+    if(!appExe.isEmpty())
+        updateInfo.setValue("app_exe", appExe);
     updateInfo.setValue("full_update", full);
     updateInfo.setValue("force_update", force);
     updateInfo.setValue("file_count", 0);

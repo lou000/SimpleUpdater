@@ -22,6 +22,7 @@ elseif(UNIX AND NOT APPLE)
     )
 endif()
 
+set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -DDEBUG")
 qt_add_executable(SimpleUpdater
     WIN32 MACOSX_BUNDLE
     ${SOURCES}

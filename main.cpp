@@ -2,6 +2,7 @@
 
 #include <QApplication>
 #include <QCommandLineParser>
+#include <QMessageBox>
 #include <QStyleHints>
 #include <QVersionNumber>
 #include "filehandler.h"
@@ -11,8 +12,8 @@ bool checkRequired(const QCommandLineParser& parser, const QCommandLineOption& d
 {
     if(parser.isSet(dependent) && !parser.isSet(required))
     {
-        QTextStream(stderr)<<"Error: --"<<dependent.names().first()<<" requires --"<<required.names().first()<<" to also be set.\n";
-        exit(0);
+        QMessageBox::critical(nullptr,"Required option missing!", "Error: --"+dependent.names().first()+" requires --"+required.names().first()+" to also be set.\n");
+        exit(1);
         return false;
     }
     return true;
@@ -27,11 +28,11 @@ bool checkRequiredOneOf(const QCommandLineParser& parser, const QCommandLineOpti
         if(parser.isSet(opt))
             return true;
 
-    QTextStream(stderr)<<"Error: At least one of the following options must be set with"<<dependent.names().first()<<":";
+    QString err = "Error: At least one of the following options must be set with "+dependent.names().first()+" :";
     for(const QCommandLineOption& opt : options)
-        QTextStream(stderr)<<" --"<<opt.names().first();
-    QTextStream(stderr)<<'\n';
-    exit(0);
+        err+="\n --"+opt.names().first();
+    QMessageBox::critical(nullptr,"Required option missing!",err);
+    exit(1);
     return false;
 }
 
@@ -39,8 +40,8 @@ bool checkExclusive(const QCommandLineParser& parser, const QCommandLineOption& 
 {
     if(parser.isSet(a) && parser.isSet(b))
     {
-        QTextStream(stderr)<<"Error: --"<<a.names().first()<<" and --" <<b.names().first()<<" cannot be used together.\n";
-        exit(0);
+        QMessageBox::critical(nullptr,"Required option missing!", "Error: --"+a.names().first()+" and --" +b.names().first()+" cannot be used together.\n");
+        exit(1);
         return false;
     }
     return true;
@@ -100,7 +101,6 @@ int main(int argc, char *argv[])
     parser.addOption(applicationExe);
     parser.process(a);
 
-    qDebug()<<"NEW VERSION";
     // cant be in updateMode and generateInfo
     checkExclusive(parser, updateMode, generateInfo);
 
@@ -130,7 +130,7 @@ int main(int argc, char *argv[])
             sourceDir = dir;
         else
         {
-            qCritical()<<"Source location"<<sourcePath<<"is either invalid or not accesible!";
+            qFatal()<<"Source location"<<sourcePath<<"is either invalid or not accesible!";
             return 1;
         }
     }
@@ -144,7 +144,7 @@ int main(int argc, char *argv[])
             targetDir = dir;
         else
         {
-            qCritical()<<"Target location"<<targetPath<<"is either invalid or not accesible!";
+            qFatal()<<"Target location"<<targetPath<<"is either invalid or not accesible!";
             return 1;
         }
     }
@@ -162,7 +162,7 @@ int main(int argc, char *argv[])
             v = QVersionNumber::fromString(str);
             if(v.isNull() || v.segmentCount() == 0)
             {
-                qDebug() << "Parsing failed for version string:" << str;
+                qFatal() << "Parsing failed for version string:" << str;
                 return 1;
             }
         }
@@ -173,7 +173,7 @@ int main(int argc, char *argv[])
             appExe = parser.value(applicationExe);
             if(!dir.exists(appExe))
             {
-                qCritical()<<"Error: Application executable"<<dir.absoluteFilePath(appExe)<<"set in --app_exe is not reachable.";
+                qFatal()<<"Error: Application executable"<<dir.absoluteFilePath(appExe)<<"set in --app_exe is not reachable.";
                 return 1;
             }
         }
@@ -181,14 +181,13 @@ int main(int argc, char *argv[])
         bool full = parser.isSet(fullUpdate);
         bool force = parser.isSet(forceUpdate);
 
-
-        qDebug()<<"Generating updateInfo.ini for";
-        qDebug()<<"Hashing files...";
         FileHandler::generateInfoFile(dir, v, appExe, full, force);
         return 0;
     }
 
     MainWindow w(sourceDir, targetDir, installation);
     w.show();
-    return a.exec();
+    int ret = a.exec();
+
+    return ret;
 }
