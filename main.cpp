@@ -134,6 +134,8 @@ int main(int argc, char *argv[])
             return 1;
         }
     }
+    else if(installation)
+        sourceDir = QApplication::applicationDirPath();
 
     std::optional<QDir> targetDir;
     if(parser.isSet(targetLocation))

@@ -17,7 +17,7 @@ class MainWindow : public QMainWindow
 
 public:
     MainWindow(std::optional<QDir> sourceLocation, std::optional<QDir> targetLocation,
-               bool installation, QWidget *parent = nullptr);
+               bool isInstall, QWidget *parent = nullptr);
 
 private:
     void installApplication(QDir sourceDir, QDir targetDir);
@@ -45,6 +45,6 @@ signals:
 
 private slots:
     void logMessage(QString msg, QColor color);
-    bool launchApp(QDir appDirectory, QStringList args);
+    bool finalize(QDir appDirectory, QStringList args, bool makeShortcut = false);
 };
 #endif // MAINWINDOW_H

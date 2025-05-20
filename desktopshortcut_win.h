@@ -23,6 +23,9 @@ inline bool createShortcut(const QString& targetPath, const QString& shortcutNam
     if (!iconPath.isEmpty())
         shellLink->SetIconLocation(reinterpret_cast<const wchar_t *>(iconPath.utf16()), 0);
 
+    QString targetDir = QFileInfo(targetPath).absolutePath();
+    shellLink->SetWorkingDirectory(reinterpret_cast<const wchar_t *>(targetDir.utf16()));
+
     ComPtr<IPersistFile> persistFile;
     if (FAILED(shellLink.As(&persistFile)))
         return false;

@@ -13,7 +13,7 @@ FileHandler::FileHandler(QObject *parent)
 
 bool FileHandler::_copyDirectoryRecursively(const QDir& source, const QDir& target, QSet<QString>* visited)
 {
-    auto exeInfo = QFileInfo(QApplication::applicationFilePath()); // to skip self
+    auto self = QFileInfo(QApplication::applicationFilePath());
 
     if(cancelRequested.load())
     {
@@ -85,7 +85,12 @@ bool FileHandler::_copyDirectoryRecursively(const QDir& source, const QDir& targ
         else if(entry.isFile())
         {
             if(QFile::exists(tgtFilePath))
+            {
+                if(QFileInfo(tgtPath) == self)
+                    continue;
+
                 QFile::remove(tgtFilePath);
+            }
             if(!QFile::copy(srcFilePath, tgtFilePath))
             {
                 qWarning()<<"Failed to copy"<<srcFilePath<<"to"<<tgtFilePath;
@@ -128,6 +133,8 @@ bool FileHandler::copyDirectoryRecursively(QDir source, QDir target)
 bool FileHandler::copyFiles(QDir source, QDir target, QStringList filePaths, bool cancelable)
 {
     bool updateSuccess = true;
+    auto self = QFileInfo(QApplication::applicationFilePath());
+
     for(const auto& relPath : filePaths)
     {
         if (cancelRequested.load() && cancelable)
@@ -138,6 +145,11 @@ bool FileHandler::copyFiles(QDir source, QDir target, QStringList filePaths, boo
 
         QString srcPath = source.filePath(relPath);
         QString tgtPath = target.filePath(relPath);
+        if(QFileInfo(tgtPath) == self)
+        {
+            emit progressUpdated({srcPath+" (SKIP)", true});
+            continue;
+        }
 
         QFileInfo srcInfo(srcPath);
         if (!srcInfo.exists())
@@ -154,8 +166,12 @@ bool FileHandler::copyFiles(QDir source, QDir target, QStringList filePaths, boo
             emit progressUpdated({srcPath+" (COPY)", false});
             continue;
         }
-
-        QFile::remove(tgtPath);
+        if(QFile::exists(tgtPath))
+        {
+            if(QFileInfo(tgtPath) == self)
+                continue;
+            QFile::remove(tgtPath);
+        }
         bool success = QFile::copy(srcPath, tgtPath);
         emit progressUpdated({srcPath+" (COPY)", success});
         if(!success)
@@ -168,12 +184,15 @@ bool FileHandler::copyFiles(QDir source, QDir target, QStringList filePaths, boo
 bool FileHandler::removeFiles(QDir dir, QStringList filePaths)
 {
     bool allRemoved = true;
+    auto self = QFileInfo(QApplication::applicationFilePath());
 
     for (const auto& relPath : filePaths)
     {
         QString filePath = dir.filePath(relPath);
-        QFileInfo fileInfo(filePath);
+        if(QFileInfo(filePath) == self)
+            continue;
 
+        QFileInfo fileInfo(filePath);
         if (!fileInfo.exists())
         {
             qWarning() << "File does not exist:" << filePath;
