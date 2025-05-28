@@ -222,7 +222,8 @@ MainWindow::MainWindow(std::optional<QDir> sourceLocation, std::optional<QDir> t
             logMessage(operation + " FAILED", Qt::red);
             QMessageBox::critical(this, tr("Copy failed!"),
                                   tr("Installation/update process failed, "
-                                  "please refer to log to see what files were not possible to copy succesfully."));
+                                     "please refer to log to see what files were not possible to copy succesfully.\n"
+                                     "Backup"));
 
             cancelButton->setVisible(false);
             quitButton->setVisible(true);
@@ -241,7 +242,7 @@ MainWindow::MainWindow(std::optional<QDir> sourceLocation, std::optional<QDir> t
             if(progressBar->maximum()==0)
                 progressBar->hide();
 
-            if(auto success = finalize(dir, {isInstall ? "--installation" : "--update"}, isInstall)) //TODO: not working
+            if(auto success = finalize(dir, {isInstall ? "--installation" : "--update"}, isInstall))
                 QApplication::quit();
             else
                 quitButton->setVisible(true);
@@ -280,11 +281,11 @@ void MainWindow::installApplication(QDir sourceDir, QDir targetDir)
 
     targetInfo.reset();
     QThreadPool::globalInstance()->start([this, targetDir, sourceDir](){
-        //create backup folder
 
+        //create backup folder
         QDir parentDir = targetDir;
         parentDir.cdUp();
-        QString backupName = targetDir.dirName() + "_backup_" + QUuid::createUuid().toString(QUuid::Id128);
+        QString backupName = targetDir.dirName() + "_backup";
         QDir backupDir = parentDir.filePath(backupName);
         qDebug()<<"Creating a backup in:"<<backupDir.absolutePath();
         if(backupDir.exists())
@@ -298,17 +299,12 @@ void MainWindow::installApplication(QDir sourceDir, QDir targetDir)
         if(backupSuccess)
         {
             logMessage("INSTALLING FILES...", Qt::green);
-        if(fileHandler->copyDirectoryRecursively(sourceDir, targetDir))
+            if(fileHandler->copyDirectoryRecursively(sourceDir, targetDir))
                 copySuccess = true;
             else
-            {
-                QDir temp = targetDir;
-                QString originalName = targetDir.dirName();
-                temp.removeRecursively();
-                parentDir.rename(backupDir.dirName(), originalName);
-            }
+                fileHandler->copyDirectoryRecursively(backupDir, targetDir);
         }
-        if(backupDir.exists())
+        if(backupDir.exists() && copySuccess)
             backupDir.removeRecursively();
         emit processFinished(copySuccess);
     });

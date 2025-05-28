@@ -3,6 +3,7 @@
 #include <QApplication>
 #include <QCommandLineParser>
 #include <QMessageBox>
+#include <QStyleFactory>
 #include <QStyleHints>
 #include <QVersionNumber>
 #include "filehandler.h"
@@ -51,6 +52,7 @@ int main(int argc, char *argv[])
 {
     QApplication a(argc, argv);
     QApplication::setApplicationVersion("0.1");
+    QApplication::setStyle(QStyleFactory::create("windows11"));
     a.styleHints()->setColorScheme(Qt::ColorScheme::Dark);
 
     QCommandLineParser parser;

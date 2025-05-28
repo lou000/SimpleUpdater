@@ -72,10 +72,10 @@ bool FileHandler::_copyDirectoryRecursively(const QDir& source, const QDir& targ
             {
                 qWarning()<<"Failed to create symbolic link:"<<tgtFilePath;
                 success = false;
-                emit progressUpdated({srcFilePath+" (COPY)", false});
+                emit progressUpdated({tgtFilePath+" (COPY) - failed to create symlink", false});
             }
             else
-                emit progressUpdated({srcFilePath+" (COPY)", true});
+                emit progressUpdated({tgtFilePath+" (COPY)", true});
         }
         else if(entry.isDir())
         {
@@ -86,7 +86,7 @@ bool FileHandler::_copyDirectoryRecursively(const QDir& source, const QDir& targ
         {
             if(QFile::exists(tgtFilePath))
             {
-                if(QFileInfo(tgtPath) == self)
+                if(QFileInfo(tgtFilePath) == self)
                     continue;
 
                 QFile::remove(tgtFilePath);
@@ -97,13 +97,13 @@ bool FileHandler::_copyDirectoryRecursively(const QDir& source, const QDir& targ
                 success = false;
             }
             visited->insert(srcFilePath);
-            emit progressUpdated({srcFilePath+" (COPY)", success});
+            emit progressUpdated({tgtFilePath+" (COPY)", success});
         }
         else
         {
             success = false;
             qWarning()<<"Unknown entry type skipped:"<<srcFilePath;
-            emit progressUpdated({srcFilePath+" (COPY)", false});
+            emit progressUpdated({tgtFilePath+" (COPY) - ???", false});
         }
 
         if(cancelRequested.load())
@@ -147,7 +147,7 @@ bool FileHandler::copyFiles(QDir source, QDir target, QStringList filePaths, boo
         QString tgtPath = target.filePath(relPath);
         if(QFileInfo(tgtPath) == self)
         {
-            emit progressUpdated({srcPath+" (SKIP)", true});
+            emit progressUpdated({tgtPath+" (SKIP)", true});
             continue;
         }
 
@@ -155,7 +155,7 @@ bool FileHandler::copyFiles(QDir source, QDir target, QStringList filePaths, boo
         if (!srcInfo.exists())
         {
             qWarning() << "File does not exist:" << srcPath;
-            emit progressUpdated({srcPath+" (COPY)", false});
+            emit progressUpdated({tgtPath+" (COPY) - file does not exist", false});
             continue;
         }
 
@@ -163,7 +163,7 @@ bool FileHandler::copyFiles(QDir source, QDir target, QStringList filePaths, boo
         if (!tgtDir.exists() && !tgtDir.mkpath("."))
         {
             qWarning() << "Failed to create target subdirectory for" << tgtPath;
-            emit progressUpdated({srcPath+" (COPY)", false});
+            emit progressUpdated({tgtPath+" (COPY) - cannot create subdirectory", false});
             continue;
         }
         if(QFile::exists(tgtPath))
@@ -173,7 +173,7 @@ bool FileHandler::copyFiles(QDir source, QDir target, QStringList filePaths, boo
             QFile::remove(tgtPath);
         }
         bool success = QFile::copy(srcPath, tgtPath);
-        emit progressUpdated({srcPath+" (COPY)", success});
+        emit progressUpdated({tgtPath+" (COPY)", success});
         if(!success)
             updateSuccess = false;
     }

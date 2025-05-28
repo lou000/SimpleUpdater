@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.19)
 project(SimpleUpdater LANGUAGES CXX)
 
 find_package(Qt6 6.5 REQUIRED COMPONENTS Core Widgets)
+set(Qt6_DIR "C:/Qt/static/lib/cmake/Qt6")
 
 qt_standard_project_setup()
 
