@@ -1,29 +1,25 @@
 #ifndef MAINWINDOW_H
 #define MAINWINDOW_H
 
-#include <QDir>
+#include "cliparser.h"
 #include <QMainWindow>
-#include <QSettings>
 
 class QPushButton;
 class QLineEdit;
-class FileHandler;
+class UpdateController;
 class QStackedWidget;
 class QTextEdit;
 class QProgressBar;
+
 class MainWindow : public QMainWindow
 {
     Q_OBJECT
 
 public:
-    MainWindow(std::optional<QDir> sourceLocation, std::optional<QDir> targetLocation,
-               bool isInstall, QWidget *parent = nullptr);
+    MainWindow(const CliResult& config, QWidget* parent = nullptr);
     ~MainWindow();
 
 private:
-    void installApplication(QDir sourceDir, QDir targetDir);
-    void updateApplication(QDir sourceDir, QDir targetDir);
-
     QStackedWidget* stackedWidget;
     QWidget* installScreen;
     QWidget* updateScreen;
@@ -37,15 +33,10 @@ private:
     QPushButton* continueButton;
     QPushButton* quitButton;
 
-    FileHandler* fileHandler;
-    std::optional<QSettings> sourceInfo;
-    std::optional<QSettings> targetInfo;
-
-signals:
-    void processFinished(bool success);
+    UpdateController* m_controller;
 
 private slots:
-    void logMessage(QString msg, QColor color);
-    bool finalize(QDir appDirectory, QStringList args, bool makeShortcut = false);
+    void logMessage(const QString& msg, const QColor& color);
 };
+
 #endif // MAINWINDOW_H
