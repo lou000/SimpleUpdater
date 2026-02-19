@@ -121,7 +121,7 @@ int main(int argc, char *argv[])
     checkRequired(parser, forceUpdate, generateInfo);
     checkRequired(parser, applicationExe, generateInfo);
 
-    bool installation = !parser.isSet(updateMode) && !parser.isSet(updateMode);
+    bool installation = !parser.isSet(updateMode) && !parser.isSet(generateInfo);
 
     std::optional<QDir> sourceDir;
     if(parser.isSet(sourceLocation))
@@ -132,7 +132,7 @@ int main(int argc, char *argv[])
             sourceDir = dir;
         else
         {
-            qFatal()<<"Source location"<<sourcePath<<"is either invalid or not accesible!";
+            qFatal()<<"Source location"<<sourcePath<<"is either invalid or not accessible!";
             return 1;
         }
     }
@@ -148,7 +148,7 @@ int main(int argc, char *argv[])
             targetDir = dir;
         else
         {
-            qFatal()<<"Target location"<<targetPath<<"is either invalid or not accesible!";
+            qFatal()<<"Target location"<<targetPath<<"is either invalid or not accessible!";
             return 1;
         }
     }

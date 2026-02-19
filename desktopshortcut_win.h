@@ -7,6 +7,7 @@
 #include <comdef.h>
 #include <wrl/client.h>
 #include <QDir>
+#include <QScopeGuard>
 #include <QStandardPaths>
 
 inline bool createShortcut(const QString& targetPath, const QString& shortcutName, const QString& iconPath = {})
@@ -14,6 +15,7 @@ inline bool createShortcut(const QString& targetPath, const QString& shortcutNam
     using namespace Microsoft::WRL;
 
     CoInitialize(nullptr);
+    auto guard = qScopeGuard([](){ CoUninitialize(); });
     ComPtr<IShellLink> shellLink;
     if (FAILED(CoCreateInstance(CLSID_ShellLink, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&shellLink))))
         return false;
@@ -33,8 +35,6 @@ inline bool createShortcut(const QString& targetPath, const QString& shortcutNam
     QString desktopPath = QStandardPaths::writableLocation(QStandardPaths::DesktopLocation);
     QString fullPath = desktopPath + "/" + shortcutName + ".lnk";
     HRESULT hr = persistFile->Save(reinterpret_cast<const wchar_t *>(fullPath.utf16()), TRUE);
-
-    CoUninitialize();
     return SUCCEEDED(hr);
 }
 

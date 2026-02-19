@@ -18,6 +18,7 @@ class MainWindow : public QMainWindow
 public:
     MainWindow(std::optional<QDir> sourceLocation, std::optional<QDir> targetLocation,
                bool isInstall, QWidget *parent = nullptr);
+    ~MainWindow();
 
 private:
     void installApplication(QDir sourceDir, QDir targetDir);

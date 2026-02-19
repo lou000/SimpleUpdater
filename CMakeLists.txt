@@ -2,7 +2,9 @@ cmake_minimum_required(VERSION 3.19)
 project(SimpleUpdater LANGUAGES CXX)
 
 find_package(Qt6 6.5 REQUIRED COMPONENTS Core Widgets)
-set(Qt6_DIR "C:/Qt/static/lib/cmake/Qt6")
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 qt_standard_project_setup()
 
@@ -23,7 +25,6 @@ elseif(UNIX AND NOT APPLE)
     )
 endif()
 
-set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -DDEBUG")
 qt_add_executable(SimpleUpdater
     WIN32 MACOSX_BUNDLE
     ${SOURCES}

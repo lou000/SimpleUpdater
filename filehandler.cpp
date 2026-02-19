@@ -91,13 +91,14 @@ bool FileHandler::_copyDirectoryRecursively(const QDir& source, const QDir& targ
 
                 QFile::remove(tgtFilePath);
             }
-            if(!QFile::copy(srcFilePath, tgtFilePath))
+            bool fileCopied = QFile::copy(srcFilePath, tgtFilePath);
+            if(!fileCopied)
             {
                 qWarning()<<"Failed to copy"<<srcFilePath<<"to"<<tgtFilePath;
                 success = false;
             }
             visited->insert(srcFilePath);
-            emit progressUpdated({tgtFilePath+" (COPY)", success});
+            emit progressUpdated({tgtFilePath+" (COPY)", fileCopied});
         }
         else
         {
@@ -238,6 +239,7 @@ QByteArray FileHandler::hashFile(QFile &file)
 
     QCryptographicHash hash(QCryptographicHash::Sha256);
     hash.addData(&file);
+    file.close();
     return hash.result();
 }
 
@@ -269,11 +271,13 @@ void FileHandler::generateInfoFile(const QDir& directory, const QVersionNumber &
                 hashFileRecursive(QDir(entry.absoluteFilePath()));
             else if (entry.isFile())
             {
+                if(entry.fileName() == "updateInfo.ini")
+                    continue;
                 auto filePath = entry.absoluteFilePath();
                 auto file = QFile(filePath);
                 QByteArray hash = hashFile(file);
 
-                //encoding filepath to base64 and ovoid / clashing in QSettings
+                //encoding filepath to base64 and avoid / clashing in QSettings
                 filePath = directory.relativeFilePath(filePath);
                 updateInfo.setValue(filePath.replace('/', "|"), hash);
                 fileCount++;
