@@ -266,8 +266,12 @@ QStringList FileHandler::verifyFiles(const QDir& directory,
     for(auto it = expectedHashes.constBegin(); it != expectedHashes.constEnd(); ++it)
     {
         QString fullPath = directory.filePath(it.key());
-        QByteArray actual = hashFile(fullPath);
-        if(actual.isEmpty() || actual != it.value())
+        QByteArray actual;
+        bool hashed = retryWithLockResolver(fullPath, [&](){
+            actual = hashFile(fullPath);
+            return !actual.isEmpty();
+        });
+        if(!hashed || actual != it.value())
             mismatches.append(it.key());
     }
 

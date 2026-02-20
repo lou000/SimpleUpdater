@@ -102,6 +102,22 @@ std::optional<Manifest> readManifest(const QString& jsonPath)
         }
     }
 
+    if(root.contains("changelog"))
+    {
+        if(root["changelog"].isArray())
+        {
+            QStringList lines;
+            for(const auto& v : root["changelog"].toArray())
+                if(v.isString())
+                    lines << v.toString();
+            manifest.changelog = lines.join('\n').trimmed();
+        }
+        else if(root["changelog"].isString())
+        {
+            manifest.changelog = root["changelog"].toString().trimmed();
+        }
+    }
+
     QJsonObject filesObj = root["files"].toObject();
     for(auto it = filesObj.constBegin(); it != filesObj.constEnd(); ++it)
     {
@@ -124,6 +140,11 @@ bool writeManifest(const QString& jsonPath, const Manifest& manifest)
 
     if(manifest.minVersion)
         root["min_version"] = manifest.minVersion->toString();
+
+    QJsonArray changelogArray;
+    for(const auto& line : manifest.changelog.split('\n'))
+        changelogArray.append(line);
+    root["changelog"] = changelogArray;
 
     QJsonObject filesObj;
     for(auto it = manifest.files.constBegin(); it != manifest.files.constEnd(); ++it)

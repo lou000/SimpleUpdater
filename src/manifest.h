@@ -11,6 +11,7 @@ struct Manifest {
     QVersionNumber version;
     std::optional<QVersionNumber> minVersion;
     QString appExe;
+    QString changelog;
     QHash<QString, QByteArray> files;  // relativePath -> sha256 hash (raw bytes)
 };
 

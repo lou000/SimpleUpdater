@@ -6,6 +6,7 @@
 
 class QPushButton;
 class QLineEdit;
+class QLabel;
 class UpdateController;
 class QStackedWidget;
 class QTextEdit;
@@ -32,8 +33,13 @@ private:
     QPushButton* cancelButton;
     QPushButton* continueButton;
     QPushButton* quitButton;
+    QLabel* headerIcon;
+    QLabel* headerTitle;
+    QLabel* headerSubtitle;
 
     UpdateController* m_controller;
+
+    static QString exeDisplayName(const QString& appExe);
 
 private slots:
     void logMessage(const QString& msg, const QColor& color);

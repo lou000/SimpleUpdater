@@ -48,6 +48,7 @@ public:
     bool isInstall() const;
     bool isCancelled() const;
     QDir targetDir() const;
+    QDir sourceDir() const;
 
     // Clean up any temporary download directory.
     void cleanupDownload();
@@ -82,6 +83,7 @@ private:
     QWaitCondition m_lockCondition;
     LockAction m_lockResponse = LockAction::Retry;
 
+    void hashTargetWithLockRetry();
     bool applyStaged(const QDir& stagingDir, const QStringList& filesToStage);
     bool resolveFileLock(const QString& absolutePath);
 };

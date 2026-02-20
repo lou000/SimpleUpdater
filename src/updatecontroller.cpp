@@ -65,6 +65,7 @@ bool UpdateController::isMandatory() const { return m_mandatory; }
 bool UpdateController::isInstall() const { return m_installMode; }
 bool UpdateController::isCancelled() const { return m_fileHandler->isCancelled(); }
 QDir UpdateController::targetDir() const { return m_targetDir; }
+QDir UpdateController::sourceDir() const { return m_sourceDir; }
 
 void UpdateController::cancel()
 {
@@ -83,6 +84,12 @@ void UpdateController::respondToLockPrompt(LockAction action)
 
 void UpdateController::prepare()
 {
+    if(!m_sourceUrl.isEmpty() && !m_sourceDir.exists())
+    {
+        emit updateReady();
+        return;
+    }
+
     auto srcManifest = readManifest(m_sourceDir.filePath("manifest.json"));
     if(srcManifest)
     {
@@ -95,13 +102,10 @@ void UpdateController::prepare()
         m_sourceManifest = m;
     }
 
-    m_targetFiles.clear();
     m_targetVersion = QVersionNumber();
 
-    if(m_targetDir.exists())
+    if(m_targetDir.exists() && !m_sourceManifest.appExe.isEmpty())
     {
-        m_targetFiles = hashDirectory(m_targetDir);
-
         QString targetExePath = m_targetDir.absoluteFilePath(m_sourceManifest.appExe);
         if(QFileInfo::exists(targetExePath))
         {
@@ -118,8 +122,6 @@ void UpdateController::prepare()
         }
     }
 
-    m_diff = FileHandler::computeDiff(m_sourceManifest.files, m_targetFiles);
-
     m_mandatory = m_forceUpdate;
     if(!m_mandatory)
     {
@@ -131,6 +133,75 @@ void UpdateController::prepare()
     }
 
     emit updateReady();
+}
+
+void UpdateController::hashTargetWithLockRetry()
+{
+    m_targetFiles.clear();
+    if(!m_targetDir.exists())
+        return;
+
+    m_targetFiles = hashDirectory(m_targetDir);
+
+    while(true)
+    {
+        QStringList unhashed;
+        QDirIterator it(m_targetDir.absolutePath(),
+                        QDir::Files | QDir::Hidden | QDir::System | QDir::NoDotAndDotDot,
+                        QDirIterator::Subdirectories);
+        while(it.hasNext())
+        {
+            it.next();
+            QFileInfo info = it.fileInfo();
+            if(info.isSymLink())
+                continue;
+
+            QString fileName = info.fileName();
+            if(fileName == "manifest.json" || fileName == "manifest.json.tmp"
+               || fileName == "updateInfo.ini")
+                continue;
+
+            QString relPath = m_targetDir.relativeFilePath(info.absoluteFilePath());
+            if(!m_targetFiles.contains(relPath))
+                unhashed << info.absoluteFilePath();
+        }
+
+        if(unhashed.isEmpty())
+            break;
+
+        auto locked = Platform::findLockingProcesses(unhashed);
+        if(locked.isEmpty())
+            break;
+
+        QStringList descriptions;
+        for(const auto& p : locked)
+            descriptions << QString("%1 (PID %2)").arg(p.name).arg(p.pid);
+
+        emit processLockDetected(descriptions);
+
+        LockAction action;
+        {
+            QMutexLocker locker(&m_lockMutex);
+            m_lockResponse = LockAction::Retry;
+            m_lockCondition.wait(&m_lockMutex);
+            action = m_lockResponse;
+        }
+
+        if(action == LockAction::Cancel)
+        {
+            m_fileHandler->cancel();
+            break;
+        }
+
+        if(action == LockAction::KillAll)
+        {
+            for(const auto& p : locked)
+                Platform::killProcess(p.pid);
+            QThread::msleep(500);
+        }
+
+        m_targetFiles = hashDirectory(m_targetDir);
+    }
 }
 
 void UpdateController::execute()
@@ -147,6 +218,10 @@ void UpdateController::execute()
         }
         prepare();
     }
+
+    emit statusMessage("SCANNING TARGET...", Qt::green);
+    hashTargetWithLockRetry();
+    m_diff = FileHandler::computeDiff(m_sourceManifest.files, m_targetFiles);
 
     QString selfPath = QCoreApplication::applicationFilePath();
     QString selfRelPath = m_targetDir.relativeFilePath(selfPath);
