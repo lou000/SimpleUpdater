@@ -11,6 +11,8 @@ namespace Platform {
 bool createShortcut(const QString& targetExePath, const QString& shortcutName,
                     const QString& iconPath = {});
 bool removeShortcut(const QString& shortcutName);
+void migrateShortcuts(const QString& oldExeName, const QString& newTargetExePath,
+                      const QString& newShortcutName, const QString& iconPath = {});
 
 std::optional<QVersionNumber> readExeVersion(const QString& exePath);
 

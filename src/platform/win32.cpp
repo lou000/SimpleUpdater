@@ -5,6 +5,7 @@
 #include <shobjidl.h>
 #include <shlguid.h>
 #include <wrl/client.h>
+#include <QDir>
 #include <QFileInfo>
 #include <QScopeGuard>
 #include <QStandardPaths>
@@ -13,13 +14,10 @@
 
 namespace Platform {
 
-bool createShortcut(const QString& targetExePath, const QString& shortcutName,
-                    const QString& iconPath)
+static bool writeShortcutFile(const QString& lnkPath, const QString& targetExePath,
+                              const QString& iconPath)
 {
     using namespace Microsoft::WRL;
-
-    CoInitialize(nullptr);
-    auto guard = qScopeGuard([]{ CoUninitialize(); });
 
     ComPtr<IShellLink> shellLink;
     if(FAILED(CoCreateInstance(CLSID_ShellLink, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&shellLink))))
@@ -37,17 +35,95 @@ bool createShortcut(const QString& targetExePath, const QString& shortcutName,
     if(FAILED(shellLink.As(&persistFile)))
         return false;
 
+    return SUCCEEDED(persistFile->Save(reinterpret_cast<const wchar_t*>(lnkPath.utf16()), TRUE));
+}
+
+static QStringList shortcutSearchDirs()
+{
+    QStringList dirs;
+    QString appData = qEnvironmentVariable("APPDATA");
+    if(!appData.isEmpty())
+    {
+        dirs << appData + "/Microsoft/Internet Explorer/Quick Launch/User Pinned/TaskBar";
+        dirs << appData + "/Microsoft/Windows/Start Menu/Programs";
+    }
+    return dirs;
+}
+
+bool createShortcut(const QString& targetExePath, const QString& shortcutName,
+                    const QString& iconPath)
+{
+    CoInitialize(nullptr);
+    auto guard = qScopeGuard([]{ CoUninitialize(); });
+
     QString desktopPath = QStandardPaths::writableLocation(QStandardPaths::DesktopLocation);
     QString fullPath = desktopPath + "/" + shortcutName + ".lnk";
-    HRESULT hr = persistFile->Save(reinterpret_cast<const wchar_t*>(fullPath.utf16()), TRUE);
-    return SUCCEEDED(hr);
+    return writeShortcutFile(fullPath, targetExePath, iconPath);
 }
 
 bool removeShortcut(const QString& shortcutName)
 {
     QString desktopPath = QStandardPaths::writableLocation(QStandardPaths::DesktopLocation);
-    QString fullPath = desktopPath + "/" + shortcutName + ".lnk";
-    return QFile::remove(fullPath);
+    return QFile::remove(desktopPath + "/" + shortcutName + ".lnk");
+}
+
+void migrateShortcuts(const QString& oldExeName, const QString& newTargetExePath,
+                      const QString& newShortcutName, const QString& iconPath)
+{
+    using namespace Microsoft::WRL;
+
+    CoInitialize(nullptr);
+    auto guard = qScopeGuard([]{ CoUninitialize(); });
+
+    QString oldExeLower = oldExeName.toLower();
+    QString newLnkName = newShortcutName + ".lnk";
+
+    QStringList dirs = shortcutSearchDirs();
+    dirs << QStandardPaths::writableLocation(QStandardPaths::DesktopLocation);
+
+    for(const QString& dirPath : dirs)
+    {
+        QDir dir(dirPath);
+        if(!dir.exists())
+            continue;
+
+        for(const QString& lnkFile : dir.entryList({"*.lnk"}, QDir::Files))
+        {
+            QString lnkPath = dir.absoluteFilePath(lnkFile);
+
+            ComPtr<IShellLink> shellLink;
+            if(FAILED(CoCreateInstance(CLSID_ShellLink, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&shellLink))))
+                continue;
+
+            ComPtr<IPersistFile> persistFile;
+            if(FAILED(shellLink.As(&persistFile)))
+                continue;
+
+            if(FAILED(persistFile->Load(reinterpret_cast<const wchar_t*>(lnkPath.utf16()), STGM_READWRITE)))
+                continue;
+
+            wchar_t existingTarget[MAX_PATH] = {};
+            if(FAILED(shellLink->GetPath(existingTarget, MAX_PATH, nullptr, SLGP_RAWPATH)))
+                continue;
+
+            QString existingExeName = QFileInfo(QString::fromWCharArray(existingTarget)).fileName().toLower();
+            if(existingExeName != oldExeLower)
+                continue;
+
+            shellLink->SetPath(reinterpret_cast<const wchar_t*>(newTargetExePath.utf16()));
+
+            QString targetDir = QFileInfo(newTargetExePath).absolutePath();
+            shellLink->SetWorkingDirectory(reinterpret_cast<const wchar_t*>(targetDir.utf16()));
+
+            if(!iconPath.isEmpty())
+                shellLink->SetIconLocation(reinterpret_cast<const wchar_t*>(iconPath.utf16()), 0);
+
+            persistFile->Save(nullptr, TRUE);
+
+            if(lnkFile.toLower() != newLnkName.toLower())
+                QFile::rename(lnkPath, dir.absoluteFilePath(newLnkName));
+        }
+    }
 }
 
 std::optional<QVersionNumber> readExeVersion(const QString& exePath)

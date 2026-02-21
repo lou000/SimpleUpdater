@@ -369,13 +369,43 @@ void UpdateController::execute()
         return;
     }
 
+    emit statusMessage("VERIFYING TARGET...", Qt::green);
+    {
+        QStringList mismatches = m_fileHandler->verifyFiles(m_targetDir, m_sourceManifest.files);
+        if(!mismatches.isEmpty())
+        {
+            for(const auto& f : mismatches)
+                emit statusMessage("Target mismatch: " + f, Qt::red);
+            emit statusMessage("TARGET VERIFICATION FAILED - ROLLING BACK...", Qt::red);
+            m_fileHandler->removeFiles(m_targetDir, m_diff.toAdd);
+            m_fileHandler->restoreFromBackup(m_targetDir, m_diff.toUpdate);
+            stagingDir.removeRecursively();
+            emit updateFinished(false);
+            return;
+        }
+    }
+
     if(!m_diff.toRemove.isEmpty())
     {
         emit statusMessage("REMOVING OBSOLETE FILES...", Qt::green);
+
+        QString newBaseName = m_sourceManifest.appExe.isEmpty()
+            ? QString() : QFileInfo(m_sourceManifest.appExe).completeBaseName();
+
         for(const auto& relPath : m_diff.toRemove)
         {
             if(relPath.endsWith(".exe", Qt::CaseInsensitive))
-                Platform::removeShortcut(QFileInfo(relPath).completeBaseName());
+            {
+                QString oldBaseName = QFileInfo(relPath).completeBaseName();
+                if(!newBaseName.isEmpty() && oldBaseName.compare(newBaseName, Qt::CaseInsensitive) != 0)
+                {
+                    QString newAbsPath = m_targetDir.absoluteFilePath(m_sourceManifest.appExe);
+                    Platform::migrateShortcuts(QFileInfo(relPath).fileName(),
+                                              newAbsPath, newBaseName);
+                }
+                else
+                    Platform::removeShortcut(oldBaseName);
+            }
         }
         m_fileHandler->removeFiles(m_targetDir, m_diff.toRemove);
     }
@@ -399,7 +429,22 @@ void UpdateController::execute()
             if(!m_sourceManifest.files.contains(relPath))
             {
                 if(relPath.endsWith(".exe", Qt::CaseInsensitive))
-                    Platform::removeShortcut(QFileInfo(relPath).completeBaseName());
+                {
+                    QString oldBaseName = QFileInfo(relPath).completeBaseName();
+                    QString newBaseName = m_sourceManifest.appExe.isEmpty()
+                        ? QString() : QFileInfo(m_sourceManifest.appExe).completeBaseName();
+
+                    if(!newBaseName.isEmpty() && oldBaseName.compare(newBaseName, Qt::CaseInsensitive) != 0)
+                    {
+                        QString newAbsPath = m_targetDir.absoluteFilePath(m_sourceManifest.appExe);
+                        Platform::migrateShortcuts(QFileInfo(relPath).fileName(),
+                                                  newAbsPath, newBaseName);
+                    }
+                    else
+                    {
+                        Platform::removeShortcut(oldBaseName);
+                    }
+                }
 
                 bool removed = false;
                 while(true)
@@ -415,22 +460,6 @@ void UpdateController::execute()
         }
 
         m_fileHandler->removeEmptyDirectories(m_targetDir);
-    }
-
-    emit statusMessage("VERIFYING TARGET...", Qt::green);
-    {
-        QStringList mismatches = m_fileHandler->verifyFiles(m_targetDir, m_sourceManifest.files);
-        if(!mismatches.isEmpty())
-        {
-            for(const auto& f : mismatches)
-                emit statusMessage("Target mismatch: " + f, Qt::red);
-            emit statusMessage("TARGET VERIFICATION FAILED - ROLLING BACK...", Qt::red);
-            m_fileHandler->removeFiles(m_targetDir, m_diff.toAdd);
-            m_fileHandler->restoreFromBackup(m_targetDir, m_diff.toUpdate);
-            stagingDir.removeRecursively();
-            emit updateFinished(false);
-            return;
-        }
     }
 
     m_fileHandler->cleanupBackups(m_targetDir, m_diff.toUpdate);

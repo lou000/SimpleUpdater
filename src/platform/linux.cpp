@@ -46,6 +46,71 @@ bool removeShortcut(const QString& shortcutName)
     return QFile::remove(desktopPath + "/" + shortcutName + ".desktop");
 }
 
+void migrateShortcuts(const QString& oldExeName, const QString& newTargetExePath,
+                      const QString& newShortcutName, const QString& iconPath)
+{
+    QStringList dirs;
+    dirs << QStandardPaths::writableLocation(QStandardPaths::DesktopLocation);
+
+    QString applicationsDir = QDir::homePath() + "/.local/share/applications";
+    if(QDir(applicationsDir).exists())
+        dirs << applicationsDir;
+
+    for(const QString& dirPath : dirs)
+    {
+        QDir dir(dirPath);
+        if(!dir.exists())
+            continue;
+
+        for(const QString& entry : dir.entryList({"*.desktop"}, QDir::Files))
+        {
+            QString filePath = dir.absoluteFilePath(entry);
+            QFile file(filePath);
+            if(!file.open(QIODevice::ReadOnly | QIODevice::Text))
+                continue;
+
+            QString content = QString::fromUtf8(file.readAll());
+            file.close();
+
+            static const QRegularExpression execRe(R"(^Exec\s*=\s*(.+)$)", QRegularExpression::MultilineOption);
+            auto match = execRe.match(content);
+            if(!match.hasMatch())
+                continue;
+
+            QString execPath = match.captured(1).trimmed();
+            QString execFileName = QFileInfo(execPath).fileName();
+            if(execFileName.compare(oldExeName, Qt::CaseInsensitive) != 0)
+                continue;
+
+            content.replace(match.capturedStart(1), match.capturedLength(1), newTargetExePath);
+
+            static const QRegularExpression nameRe(R"(^Name\s*=\s*(.+)$)", QRegularExpression::MultilineOption);
+            auto nameMatch = nameRe.match(content);
+            if(nameMatch.hasMatch())
+                content.replace(nameMatch.capturedStart(1), nameMatch.capturedLength(1), newShortcutName);
+
+            if(!iconPath.isEmpty())
+            {
+                static const QRegularExpression iconRe(R"(^Icon\s*=\s*(.+)$)", QRegularExpression::MultilineOption);
+                auto iconMatch = iconRe.match(content);
+                if(iconMatch.hasMatch())
+                    content.replace(iconMatch.capturedStart(1), iconMatch.capturedLength(1), iconPath);
+            }
+
+            QFile outFile(filePath);
+            if(outFile.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text))
+            {
+                outFile.write(content.toUtf8());
+                outFile.close();
+            }
+
+            QString newFileName = newShortcutName + ".desktop";
+            if(entry.compare(newFileName, Qt::CaseInsensitive) != 0)
+                QFile::rename(filePath, dir.absoluteFilePath(newFileName));
+        }
+    }
+}
+
 std::optional<QVersionNumber> readExeVersion(const QString& exePath)
 {
     QProcess proc;
